@@ -1,0 +1,107 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+
+import Layout from './components/layout/Layout';
+import PrivateRoute from './routes/PrivateRoute';
+import RoleRoute from './routes/RoleRoute';
+
+import LoginPage from './pages/LoginPage';
+import AttendPage from './pages/AttendPage';
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './pages/auth/ResetPasswordPage';
+import DashboardPage from './pages/dashboard/DashboardPage';
+import TraineesPage from './pages/trainees/TraineesPage';
+import AttendancePage from './pages/attendance/AttendancePage';
+import SessionDetailPage from './pages/attendance/SessionDetailPage';
+import SubmissionsPage from './pages/submissions/SubmissionsPage';
+import NewSubmissionPage from './pages/submissions/NewSubmissionPage';
+import DowntimePage from './pages/downtime/DowntimePage';
+import InstructorsPage from './pages/users/InstructorsPage';
+import UsersPage from './pages/admin/UsersPage';
+import ProfilePage from './pages/account/ProfilePage';
+import SettingsPage from './pages/account/SettingsPage';
+
+export default function App() {
+  return (
+    <Routes>
+      {/* Public */}
+      <Route path="/login" element={<LoginPage />} />
+      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/attend/:token" element={<AttendPage />} />
+
+      {/* Authenticated (wrapped in Layout) */}
+      <Route
+        element={
+          <PrivateRoute>
+            <Layout />
+          </PrivateRoute>
+        }
+      >
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
+
+        <Route
+          path="/trainees"
+          element={
+            <RoleRoute roles={['instructor']} requireFlag="has_trainees">
+              <TraineesPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/attendance"
+          element={
+            <RoleRoute roles={['instructor']} requireFlag="has_trainees">
+              <AttendancePage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/attendance/:sessionId"
+          element={
+            <RoleRoute roles={['instructor', 'supervisor']}>
+              <SessionDetailPage />
+            </RoleRoute>
+          }
+        />
+
+        <Route path="/submissions" element={<SubmissionsPage />} />
+        <Route
+          path="/submissions/new"
+          element={
+            <RoleRoute roles={['instructor']}>
+              <NewSubmissionPage />
+            </RoleRoute>
+          }
+        />
+
+        <Route path="/downtime" element={<DowntimePage />} />
+
+        <Route
+          path="/instructors"
+          element={
+            <RoleRoute roles={['supervisor']}>
+              <InstructorsPage />
+            </RoleRoute>
+          }
+        />
+
+        {/* System admin */}
+        <Route
+          path="/users"
+          element={
+            <RoleRoute roles={['admin']}>
+              <UsersPage />
+            </RoleRoute>
+          }
+        />
+
+        {/* Account (all authenticated users) */}
+        <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+      </Route>
+
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  );
+}

@@ -1,0 +1,62 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@600;700&family=Inter:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Semantic color tokens. Light values on :root; .dark (applied to the
+   authenticated layout wrapper) overrides them. Public pages live outside
+   .dark and therefore always render in light mode. */
+:root {
+  --color-canvas: #f8faff;
+  --color-card: #ffffff;
+  --color-line: #e2e8f0;
+  --color-ink: #374151;
+  --color-subtle: #6b7280;
+  --color-hover: #f1f5f9;
+  --color-accent-soft: #eff4ff;
+}
+
+.dark {
+  --color-canvas: #0b1120;
+  --color-card: #131c31;
+  --color-line: #28324a;
+  --color-ink: #e6eaf2;
+  --color-subtle: #94a3b8;
+  --color-hover: #1c2740;
+  --color-accent-soft: rgba(59, 99, 212, 0.16);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: #f8faff;
+    font-family: 'Inter', sans-serif;
+    color: #374151;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    font-weight: 700;
+  }
+}
+
+/* Thin, institutional scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-line);
+  border-radius: 9999px;
+}

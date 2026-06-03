@@ -25,8 +25,27 @@ function getS3() {
   return _client;
 }
 
-function isS3 () {
-  return (process.env.STORAGE_DRIVER || 'local') === 's3';
+function hasS3Creds() {
+  return Boolean(
+    process.env.S3_BUCKET &&
+      process.env.AWS_ACCESS_KEY_ID &&
+      process.env.AWS_SECRET_ACCESS_KEY &&
+      (process.env.AWS_REGION || process.env.S3_ENDPOINT)
+  );
 }
 
-module.exports = { getS3, isS3, S3_BUCKET };
+/**
+ * Decide the active storage driver:
+ *   STORAGE_DRIVER=s3     -> always S3
+ *   STORAGE_DRIVER=local  -> always local disk
+ *   (unset)               -> S3 when credentials are present, else local
+ * This means "if the env has S3 creds, uploads go to S3".
+ */
+function isS3() {
+  const driver = process.env.STORAGE_DRIVER;
+  if (driver === 's3') return true;
+  if (driver === 'local') return false;
+  return hasS3Creds();
+}
+
+module.exports = { getS3, isS3, hasS3Creds, S3_BUCKET };

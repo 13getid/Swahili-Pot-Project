@@ -76,6 +76,20 @@ app.use((err, req, res, next) => {
     return res.status(400).json({ error: err.message });
   }
 
+  // S3 / AWS storage failures — surface a clear message instead of an opaque 500.
+  const isS3Error =
+    err.$metadata ||
+    /credential|s3|region|endpoint|getaddrinfo|ENOTFOUND|EAI_AGAIN/i.test(
+      `${err.name} ${err.code} ${err.message}`
+    );
+  if (isS3Error && req.path && req.path.includes('/submissions')) {
+    return res.status(502).json({
+      error:
+        'File storage error — the S3 bucket, region, or credentials look misconfigured. ' +
+        'Check AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and S3_BUCKET.',
+    });
+  }
+
   const status = err.status || 500;
   const message = status === 500 ? 'Something went wrong on the server.' : err.message;
   return res.status(status).json({ error: message });

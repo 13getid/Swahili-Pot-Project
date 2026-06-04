@@ -1,6 +1,6 @@
 'use strict';
 
-const { S3Client } = require('@aws-sdk/client-s3');
+const { S3Client, HeadBucketCommand } = require('@aws-sdk/client-s3');
 
 const S3_BUCKET = process.env.S3_BUCKET;
 
@@ -48,4 +48,31 @@ function isS3() {
   return hasS3Creds();
 }
 
-module.exports = { getS3, isS3, hasS3Creds, S3_BUCKET };
+/**
+ * Startup connectivity check. Logs a clear, actionable line so a
+ * misconfigured bucket/region/credentials is obvious in `pm2 logs`.
+ */
+async function checkS3() {
+  if (!isS3()) {
+    console.log('[storage] Using LOCAL disk for uploads (set STORAGE_DRIVER=s3 to use S3).');
+    return;
+  }
+  const bucket = process.env.S3_BUCKET;
+  const region = process.env.AWS_REGION;
+  if (!bucket || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY || !region) {
+    console.error('[storage] STORAGE_DRIVER=s3 but AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / S3_BUCKET are not all set.');
+    return;
+  }
+  try {
+    await getS3().send(new HeadBucketCommand({ Bucket: bucket }));
+    console.log(`[storage] S3 OK — uploads go to bucket "${bucket}" (${region}).`);
+  } catch (err) {
+    const code = err.name || err.Code || err.code || 'unknown';
+    console.error(
+      `[storage] S3 NOT reachable for bucket "${bucket}" (${region}): ${code} — ${err.message}. ` +
+        'Uploads will fail. Check AWS_REGION matches the bucket region, the bucket name, and the credentials.'
+    );
+  }
+}
+
+module.exports = { getS3, isS3, hasS3Creds, checkS3, S3_BUCKET };

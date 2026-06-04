@@ -68,7 +68,7 @@ async function migrate(retries = 8) {
 
 // Allow running directly: `npm run migrate`
 if (require.main === module) {
-  require('dotenv').config();
+  require('dotenv').config({ override: true });
   migrate()
     .then(() => pool.end())
     .then(() => process.exit(0))

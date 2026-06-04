@@ -86,7 +86,7 @@ async function seed() {
 }
 
 if (require.main === module) {
-  require('dotenv').config();
+  require('dotenv').config({ override: true });
   seed()
     .then(() => pool.end())
     .then(() => process.exit(0))

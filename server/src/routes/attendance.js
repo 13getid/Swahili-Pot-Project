@@ -69,6 +69,52 @@ router.patch('/sessions/:id', verifyToken, requireRole('instructor'), async (req
   }
 });
 
+// DELETE /api/attendance/sessions/:id — instructor owner (cascades records)
+router.delete('/sessions/:id', verifyToken, requireRole('instructor'), async (req, res, next) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid session id' });
+
+    const { rowCount } = await pool.query(
+      'DELETE FROM attendance_sessions WHERE id = $1 AND instructor_id = $2',
+      [id, req.user.id]
+    );
+    if (rowCount === 0) return res.status(404).json({ error: 'Session not found' });
+    return res.json({ message: 'Session deleted' });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// GET /api/attendance/records-range?period=week|month — instructor: all attendance
+// across this instructor's sessions within the current week or month (EAT).
+router.get('/records-range', verifyToken, requireRole('instructor'), async (req, res, next) => {
+  try {
+    const period = req.query.period === 'month' ? 'month' : 'week';
+    const trunc = period === 'month' ? 'month' : 'week';
+
+    const { rows } = await pool.query(
+      `SELECT r.id, r.trainee_name, r.trainee_phone, r.check_in,
+              s.session_label, s.id AS session_id
+         FROM attendance_records r
+         JOIN attendance_sessions s ON s.id = r.session_id
+        WHERE s.instructor_id = $1
+          AND (r.check_in AT TIME ZONE 'Africa/Nairobi')
+              >= date_trunc('${trunc}', (NOW() AT TIME ZONE 'Africa/Nairobi'))
+        ORDER BY r.check_in ASC`,
+      [req.user.id]
+    );
+
+    return res.json({
+      period,
+      department_name: req.user.department_name || null,
+      records: rows,
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
+
 // GET /api/attendance/sessions/supervisor-view — supervisor only, own department
 router.get('/sessions/supervisor-view', verifyToken, requireRole('supervisor'), async (req, res, next) => {
   try {

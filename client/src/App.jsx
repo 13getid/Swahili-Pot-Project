@@ -29,6 +29,7 @@ import TasksPage from './pages/tasks/TasksPage';
 import InquiriesPage from './pages/inquiries/InquiriesPage';
 import RemindersPage from './pages/attachee/RemindersPage';
 import AttacheesPage from './pages/attachees/AttacheesPage';
+import AttacheeDetailPage from './pages/attachees/AttacheeDetailPage';
 import SupervisorAttendancePage from './pages/attendance/SupervisorAttendancePage';
 import AnnouncementsPage from './pages/announcements/AnnouncementsPage';
 import SessionLogsPage from './pages/sessionLogs/SessionLogsPage';
@@ -216,6 +217,14 @@ export default function App() {
           element={
             <RoleRoute roles={['instructor', 'supervisor']}>
               <AttacheesPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/attachees/:id"
+          element={
+            <RoleRoute roles={['instructor', 'supervisor']}>
+              <AttacheeDetailPage />
             </RoleRoute>
           }
         />

@@ -70,6 +70,26 @@ router.get('/dashboard', requireRole('attachee'), async (req, res, next) => {
       [req.user.id]
     );
 
+    const profRes = await pool.query(
+      `SELECT university_name, course_of_study, attachment_start_date, attachment_end_date
+         FROM attachee_profiles WHERE user_id = $1`,
+      [req.user.id]
+    );
+    let attachment = profRes.rows[0] || null;
+    if (attachment && attachment.attachment_start_date && attachment.attachment_end_date) {
+      const start = new Date(attachment.attachment_start_date);
+      const end = new Date(attachment.attachment_end_date);
+      const now = new Date();
+      const totalDays = Math.max(1, Math.round((end - start) / 86400000));
+      attachment = {
+        ...attachment,
+        total_days: totalDays,
+        days_elapsed: Math.max(0, Math.round((now - start) / 86400000)),
+        days_remaining: Math.max(0, Math.round((end - now) / 86400000)),
+        progress_percent: Math.min(100, Math.round((Math.max(0, now - start) / 86400000 / totalDays) * 100)),
+      };
+    }
+
     return res.json({
       stats: {
         activeTasks: tasks.rows[0].c,
@@ -79,6 +99,7 @@ router.get('/dashboard', requireRole('attachee'), async (req, res, next) => {
       },
       today: today.rows[0] || null,
       recentTasks: recent.rows,
+      attachment,
     });
   } catch (err) {
     return next(err);

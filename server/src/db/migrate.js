@@ -140,6 +140,62 @@ async function runOnce() {
          SET value = value || '{"system_ai_enabled": true}'::jsonb
        WHERE key = 'platform' AND NOT (value ? 'system_ai_enabled')`);
 
+    // --- Delta 5: trainee vs attachee separation ---
+    // Formal attachment profile for attachee-role users. Columns are nullable so
+    // the existing attachee accounts can be backfilled incrementally.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS attachee_profiles (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        university_name VARCHAR(255),
+        course_of_study VARCHAR(255),
+        student_id_number VARCHAR(100),
+        attachment_start_date DATE,
+        attachment_end_date DATE,
+        supervisor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        instructor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        department_id INTEGER REFERENCES departments(id) ON DELETE RESTRICT,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_attachee_profiles_dept ON attachee_profiles(department_id)');
+
+    // Repoint the AI tables from trainees -> attachee-role users. The AI layer
+    // was built treating a trainees row as the "attachee"; the correct subject is
+    // the attachee user account. Safe to flip the FK (no AI rows exist yet).
+    await client.query('ALTER TABLE attachee_ai_profiles DROP CONSTRAINT IF EXISTS attachee_ai_profiles_attachee_id_fkey');
+    await client.query('ALTER TABLE attachee_ai_profiles ADD CONSTRAINT attachee_ai_profiles_attachee_id_fkey FOREIGN KEY (attachee_id) REFERENCES users(id) ON DELETE CASCADE');
+    await client.query('ALTER TABLE ai_reports DROP CONSTRAINT IF EXISTS ai_reports_attachee_id_fkey');
+    await client.query('ALTER TABLE ai_reports ADD CONSTRAINT ai_reports_attachee_id_fkey FOREIGN KEY (attachee_id) REFERENCES users(id) ON DELETE CASCADE');
+
+    // General (not task-bound) supervisor/instructor notes on an attachee.
+    await client.query('ALTER TABLE task_comments ALTER COLUMN task_id DROP NOT NULL');
+    await client.query('ALTER TABLE task_comments ADD COLUMN IF NOT EXISTS is_general_note BOOLEAN NOT NULL DEFAULT false');
+    await client.query('ALTER TABLE task_comments ADD COLUMN IF NOT EXISTS attachee_id INTEGER REFERENCES users(id) ON DELETE CASCADE');
+
+    // Attachee programme enrolment (separate from trainee course enrolment).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS attachee_program_enrollments (
+        id SERIAL PRIMARY KEY,
+        program_id INTEGER NOT NULL REFERENCES programs(id) ON DELETE CASCADE,
+        attachee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        enrolled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE (program_id, attachee_id)
+      )`);
+
+    // Simple trainee (community learner) completion certificates.
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS trainee_certificates (
+        id SERIAL PRIMARY KEY,
+        trainee_id INTEGER NOT NULL REFERENCES trainees(id) ON DELETE CASCADE,
+        department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+        generated_by INTEGER NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+        course_name VARCHAR(255) NOT NULL,
+        completion_date DATE NOT NULL,
+        generated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+
     // Intentional startup logging.
     console.log('Database migration complete — all tables ensured.');
   } finally {

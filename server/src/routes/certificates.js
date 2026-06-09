@@ -2,6 +2,7 @@
 
 const express = require('express');
 const PDFDocument = require('pdfkit');
+const pool = require('../db/pool');
 const verifyToken = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
 
@@ -108,10 +109,34 @@ function completionCertificateBody(doc, d) {
   doc.text(`from ${longDate(d.start_date)} to ${longDate(d.end_date)}`, { align: 'center' });
 }
 
-// POST /api/certificates/generate — supervisor only, streams a PDF
-router.post('/generate', verifyToken, requireRole('supervisor'), (req, res, next) => {
+// POST /api/certificates/generate — supervisor only, streams a PDF.
+// For attachees: pass attachee_id and the name/university/course/dates/department
+// are pulled from users + attachee_profiles (manual body fields still override).
+router.post('/generate', verifyToken, requireRole('supervisor'), async (req, res, next) => {
   try {
-    const d = req.body || {};
+    const d = { ...(req.body || {}) };
+
+    if (d.attachee_id) {
+      const { rows } = await pool.query(
+        `SELECT u.name, d.name AS department_name,
+                ap.university_name, ap.course_of_study,
+                ap.attachment_start_date, ap.attachment_end_date
+           FROM users u
+           JOIN departments d ON d.id = u.department_id
+           LEFT JOIN attachee_profiles ap ON ap.user_id = u.id
+          WHERE u.id = $1 AND u.role = 'attachee' AND u.department_id = $2`,
+        [parseInt(d.attachee_id, 10), req.user.department_id]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Attachee not found' });
+      const att = rows[0];
+      // DB values fill in any field not explicitly provided in the body.
+      d.attachee_name = d.attachee_name || att.name;
+      d.department_name = d.department_name || att.department_name;
+      d.program_name = d.program_name || att.course_of_study || 'Industrial Attachment';
+      d.start_date = d.start_date || att.attachment_start_date;
+      d.end_date = d.end_date || att.attachment_end_date;
+    }
+
     const required = [
       'attachee_name', 'department_name', 'program_name',
       'start_date', 'end_date', 'supervisor_name', 'supervisor_title', 'certificate_type',
@@ -144,6 +169,61 @@ router.post('/generate', verifyToken, requireRole('supervisor'), (req, res, next
     }
     drawFooter(doc, d.supervisor_name, d.supervisor_title);
 
+    doc.end();
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// POST /api/certificates/trainee — instructor only. Simple completion
+// certificate for a community learner (trainee), no AI narrative.
+router.post('/trainee', verifyToken, requireRole('instructor', 'supervisor'), async (req, res, next) => {
+  try {
+    const { trainee_id, course_name, completion_date } = req.body || {};
+    if (!trainee_id) return res.status(400).json({ error: 'trainee_id is required' });
+    if (!course_name || !course_name.trim()) return res.status(400).json({ error: 'course_name is required' });
+    if (!completion_date) return res.status(400).json({ error: 'completion_date is required' });
+
+    const { rows } = await pool.query(
+      `SELECT t.id, t.name, d.name AS department_name
+         FROM trainees t JOIN departments d ON d.id = t.department_id
+        WHERE t.id = $1 AND t.department_id = $2`,
+      [parseInt(trainee_id, 10), req.user.department_id]
+    );
+    if (!rows.length) return res.status(404).json({ error: 'Trainee not found' });
+    const tr = rows[0];
+
+    await pool.query(
+      `INSERT INTO trainee_certificates (trainee_id, department_id, generated_by, course_name, completion_date)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [tr.id, req.user.department_id, req.user.id, course_name.trim(), completion_date]
+    );
+
+    const safeName = String(tr.name).replace(/[^a-z0-9]+/gi, '-');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}-completion-certificate.pdf"`);
+
+    const doc = new PDFDocument({ size: 'A4', margin: 72 });
+    doc.on('error', next);
+    doc.pipe(res);
+
+    drawHeader(doc);
+    doc.moveDown(1);
+    doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(18).text('CERTIFICATE OF COMPLETION', { align: 'center' });
+    doc.moveDown(2);
+    doc.fillColor(INK).font('Helvetica').fontSize(11).text('This is to certify that', { align: 'center' });
+    doc.moveDown(0.6);
+    doc.fillColor(BRAND).font('Helvetica-Bold').fontSize(16).text(tr.name, { align: 'center', underline: true });
+    doc.moveDown(0.6);
+    doc.fillColor(INK).font('Helvetica').fontSize(11).text('has successfully completed the', { align: 'center' });
+    doc.moveDown(0.6);
+    doc.font('Helvetica-Bold').fontSize(13).text(course_name.trim(), { align: 'center' });
+    doc.moveDown(0.6);
+    doc.font('Helvetica').fontSize(11).text(`course at Swahilipot Hub Foundation, ${tr.department_name}`, { align: 'center' });
+    doc.moveDown(0.4);
+    doc.text(`on ${longDate(completion_date)}`, { align: 'center' });
+
+    drawFooter(doc, req.user.name, 'Department Instructor');
     doc.end();
   } catch (err) {
     return next(err);

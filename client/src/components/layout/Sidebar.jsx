@@ -62,33 +62,46 @@ function buildNav(user) {
     return items;
   }
 
-  // Instructor / supervisor.
-  if (user.role === 'instructor' && user.has_trainees) {
-    items.push({ to: '/trainees', label: 'Trainees', icon: Users });
-    items.push({ to: '/attendance', label: 'Attendance', icon: ClipboardCheck });
-  }
-  if (user.role === 'supervisor') {
-    items.push({ to: '/dept-attendance', label: 'Attendance', icon: ClipboardCheck });
+  // Instructor / supervisor — grouped so trainees (community learners) and
+  // attachees (university students) are clearly separate.
+
+  // TRAINEES — community learners, attendance only.
+  if ((user.role === 'instructor' && user.has_trainees) || user.role === 'supervisor') {
+    items.push({ section: 'Trainees' });
+    if (user.role === 'instructor' && user.has_trainees) {
+      items.push({ to: '/trainees', label: 'Trainees', icon: Users });
+      items.push({ to: '/attendance', label: 'Attendance', icon: ClipboardCheck });
+    }
+    if (user.role === 'supervisor') {
+      items.push({ to: '/dept-attendance', label: 'Attendance', icon: ClipboardCheck });
+    }
   }
 
-  items.push({ to: '/session-logs', label: 'Session Logs', icon: BookOpen });
-  items.push({ to: '/programs', label: 'Programs', icon: Layers });
-  items.push({ to: '/visitors', label: 'Visitor Log', icon: ClipboardList });
-
-  items.push({ to: '/submissions', label: 'Submissions', icon: FileText });
-  items.push({ to: '/tasks', label: 'Tasks', icon: ListTodo });
+  // ATTACHEES — university students, full management.
+  items.push({ section: 'Attachees' });
   items.push({ to: '/attachees', label: 'Attachees', icon: GraduationCap });
-  items.push({ to: '/inquiries', label: 'Inquiries', icon: MessageSquare });
+  items.push({ to: '/tasks', label: 'Tasks', icon: ListTodo });
+  items.push({ to: '/programs', label: 'Programs', icon: Layers });
+  if (user.role === 'supervisor') {
+    items.push({ to: '/performance', label: 'Performance', icon: BarChart2 });
+    items.push({ to: '/ai/assistant', label: 'AI Assistant', icon: Sparkles });
+  }
 
+  // DEPARTMENT — shared department tooling.
+  items.push({ section: 'Department' });
+  items.push({ to: '/submissions', label: 'Submissions', icon: FileText });
+  items.push({ to: '/session-logs', label: 'Session Logs', icon: BookOpen });
+  items.push({ to: '/inquiries', label: 'Inquiries', icon: MessageSquare });
+  items.push({ to: '/visitors', label: 'Visitor Log', icon: ClipboardList });
   if (user.has_radio_report) {
     items.push({ to: '/downtime', label: 'Downtime Reports', icon: Radio });
   }
 
+  // TEAM — supervisor management.
   if (user.role === 'supervisor') {
+    items.push({ section: 'Team' });
     items.push({ to: '/instructors', label: 'Instructors', icon: UserCog });
-    items.push({ to: '/performance', label: 'Performance', icon: BarChart2 });
     items.push({ to: '/certificates', label: 'Certificates', icon: Award });
-    items.push({ to: '/ai/assistant', label: 'AI Assistant', icon: Sparkles });
   }
 
   return items;
@@ -105,23 +118,32 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
-        {nav.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/dashboard'}
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
-                isActive
-                  ? 'bg-accentSoft font-medium text-brand-600'
-                  : 'text-ink hover:bg-hover'
-              }`
-            }
-          >
-            <Icon size={18} />
-            {label}
-          </NavLink>
-        ))}
+        {nav.map((item) =>
+          item.section ? (
+            <p
+              key={`s-${item.section}`}
+              className="px-3 pb-1 pt-4 text-[10px] font-semibold uppercase tracking-wider text-subtle first:pt-0"
+            >
+              {item.section}
+            </p>
+          ) : (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === '/dashboard'}
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${
+                  isActive
+                    ? 'bg-accentSoft font-medium text-brand-600'
+                    : 'text-ink hover:bg-hover'
+                }`
+              }
+            >
+              <item.icon size={18} />
+              {item.label}
+            </NavLink>
+          )
+        )}
       </nav>
 
       <div className="border-t border-line px-4 py-4">

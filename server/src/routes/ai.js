@@ -54,7 +54,7 @@ router.get(
 
       // Verify ownership and grab the display name.
       const check = await pool.query(
-        'SELECT id, name FROM trainees WHERE id = $1 AND department_id = $2',
+        "SELECT id, name FROM users WHERE id = $1 AND role = 'attachee' AND department_id = $2",
         [attacheeId, departmentId]
       );
       if (!check.rows.length) return res.status(404).json({ error: 'Attachee not found' });
@@ -156,7 +156,7 @@ router.post(
     try {
       const attacheeId = parseInt(req.params.attacheeId, 10);
       if (Number.isNaN(attacheeId)) return res.status(400).json({ error: 'Invalid attachee id' });
-      // Department scope: only clear profiles for trainees in this department.
+      // Department scope: only clear profiles for attachees in this department.
       await pool.query(
         `DELETE FROM attachee_ai_profiles
           WHERE attachee_id = $1 AND department_id = $2`,
@@ -191,7 +191,7 @@ router.post(
 
       // Ownership check.
       const check = await pool.query(
-        'SELECT id FROM trainees WHERE id = $1 AND department_id = $2',
+        "SELECT id FROM users WHERE id = $1 AND role = 'attachee' AND department_id = $2",
         [attacheeId, departmentId]
       );
       if (!check.rows.length) return res.status(404).json({ error: 'Attachee not found' });
@@ -522,7 +522,7 @@ router.post(
       }
 
       const check = await pool.query(
-        'SELECT id FROM trainees WHERE id = $1 AND department_id = $2',
+        "SELECT id FROM users WHERE id = $1 AND role = 'attachee' AND department_id = $2",
         [attacheeId, departmentId]
       );
       if (!check.rows.length) return res.status(404).json({ error: 'Attachee not found' });
@@ -621,7 +621,7 @@ router.get(
       const { rows } = await pool.query(
         `SELECT r.*, t.name AS attachee_name, d.name AS department_name, u.name AS supervisor_name
            FROM ai_reports r
-           JOIN trainees t ON t.id = r.attachee_id
+           JOIN users t ON t.id = r.attachee_id
            JOIN departments d ON d.id = r.department_id
            JOIN users u ON u.id = r.generated_by
           WHERE r.id = $1 AND r.department_id = $2`,

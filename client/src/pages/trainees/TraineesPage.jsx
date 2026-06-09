@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { UserPlus, Users, Trash2, FileDown, Upload, Brain } from 'lucide-react';
+import { UserPlus, Users, Trash2, FileDown, Upload } from 'lucide-react';
 import { getTrainees, createTrainee, deactivateTrainee } from '../../api/trainees';
 import BulkImportModal from '../../components/trainees/BulkImportModal';
 import { useAuth } from '../../context/AuthContext';
@@ -158,22 +157,14 @@ export default function TraineesPage() {
                   <Badge status={t.is_active ? 'active' : 'inactive'} />
                 </TD>
                 <TD className="text-right">
-                  <div className="inline-flex items-center justify-end gap-3">
-                    <Link
-                      to={`/ai/attachees/${t.id}/profile`}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg bg-accentSoft text-brand-600 hover:bg-hover transition-colors"
+                  {t.is_active && (
+                    <button
+                      onClick={() => setConfirmTarget(t)}
+                      className="inline-flex items-center gap-1 text-sm text-[#dc2626] hover:underline"
                     >
-                      <Brain size={14} /> AI Profile
-                    </Link>
-                    {t.is_active && (
-                      <button
-                        onClick={() => setConfirmTarget(t)}
-                        className="inline-flex items-center gap-1 text-sm text-[#dc2626] hover:underline"
-                      >
-                        <Trash2 size={14} /> Deactivate
-                      </button>
-                    )}
-                  </div>
+                      <Trash2 size={14} /> Deactivate
+                    </button>
+                  )}
                 </TD>
               </TR>
             ))}

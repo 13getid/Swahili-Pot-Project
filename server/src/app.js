@@ -28,7 +28,6 @@ const activityRoutes = require('./routes/activity');
 const performanceRoutes = require('./routes/performance');
 const certificateRoutes = require('./routes/certificates');
 const programRoutes = require('./routes/programs');
-const visitorRoutes = require('./routes/visitors');
 const aiRoutes = require('./routes/ai');
 
 const maintenanceGuard = require('./middleware/maintenance');
@@ -77,7 +76,6 @@ app.use('/api/activity', activityRoutes);
 app.use('/api/performance', performanceRoutes);
 app.use('/api/certificates', certificateRoutes);
 app.use('/api/programs', programRoutes);
-app.use('/api/visitors', visitorRoutes);
 app.use('/api/ai', aiRoutes);
 
 // 404 fallback for unknown API routes

@@ -15,7 +15,6 @@ import {
   Megaphone,
   BookOpen,
   Layers,
-  ClipboardList,
   BarChart2,
   Award,
   Building2,
@@ -42,7 +41,6 @@ function buildNav(user) {
     items.push({ to: '/users', label: 'User Management', icon: ShieldCheck });
     items.push({ to: '/departments', label: 'Departments', icon: Building2 });
     items.push({ to: '/site', label: 'Website Content', icon: Globe });
-    items.push({ to: '/visitors', label: 'Visitor Log', icon: ClipboardList });
     items.push({ to: '/certificates', label: 'Certificates', icon: Award });
     items.push({ to: '/audit', label: 'Audit Log', icon: ScrollText });
     items.push({ to: '/admin/ai-usage', label: 'AI Usage', icon: Sparkles });
@@ -92,7 +90,6 @@ function buildNav(user) {
   items.push({ to: '/submissions', label: 'Submissions', icon: FileText });
   items.push({ to: '/session-logs', label: 'Session Logs', icon: BookOpen });
   items.push({ to: '/inquiries', label: 'Inquiries', icon: MessageSquare });
-  items.push({ to: '/visitors', label: 'Visitor Log', icon: ClipboardList });
   if (user.has_radio_report) {
     items.push({ to: '/downtime', label: 'Downtime Reports', icon: Radio });
   }

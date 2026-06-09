@@ -20,7 +20,6 @@ const TITLES = {
   '/performance': 'Attachee Performance',
   '/certificates': 'Certificates',
   '/programs': 'Programs',
-  '/visitors': 'Visitor Log',
   '/profile': 'My Profile',
   '/settings': 'Account Settings',
 };

@@ -36,7 +36,6 @@ import SessionLogsPage from './pages/sessionLogs/SessionLogsPage';
 import PerformancePage from './pages/performance/PerformancePage';
 import CertificatesPage from './pages/certificates/CertificatesPage';
 import ProgramsPage from './pages/programs/ProgramsPage';
-import VisitorLogPage from './pages/visitors/VisitorLogPage';
 import AttacheeProfilePage from './pages/AttacheeProfilePage';
 import AIReportsPage from './pages/AIReportsPage';
 import AssistantPage from './pages/ai/AssistantPage';
@@ -114,14 +113,6 @@ export default function App() {
           element={
             <RoleRoute roles={['supervisor', 'instructor']}>
               <ProgramsPage />
-            </RoleRoute>
-          }
-        />
-        <Route
-          path="/visitors"
-          element={
-            <RoleRoute roles={['supervisor', 'instructor', 'admin']}>
-              <VisitorLogPage />
             </RoleRoute>
           }
         />

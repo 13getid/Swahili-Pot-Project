@@ -12,6 +12,8 @@ import {
   Building2,
   UserX,
   GraduationCap,
+  ScrollText,
+  Settings,
 } from 'lucide-react';
 import { getDashboard } from '../../api/dashboard';
 import { getAdminStats } from '../../api/admin';
@@ -97,7 +99,42 @@ function AdminDashboard() {
           <ShieldCheck size={16} /> Manage Users
         </Link>
       </Card>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <QuickLink
+          to="/departments"
+          icon={Building2}
+          title="Departments"
+          description="Create and configure departments."
+        />
+        <QuickLink
+          to="/audit"
+          icon={ScrollText}
+          title="Audit Log"
+          description="Review every administrative action."
+        />
+        <QuickLink
+          to="/platform-settings"
+          icon={Settings}
+          title="Platform Settings"
+          description="Maintenance mode and system limits."
+        />
+      </div>
     </div>
+  );
+}
+
+function QuickLink({ to, icon: Icon, title, description }) {
+  return (
+    <Link to={to}>
+      <Card className="h-full p-5 transition-colors hover:bg-hover">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accentSoft">
+          <Icon size={18} className="text-brand-600" />
+        </div>
+        <h3 className="mt-3 font-display text-base font-semibold text-ink">{title}</h3>
+        <p className="mt-1 text-sm text-subtle">{description}</p>
+      </Card>
+    </Link>
   );
 }
 

@@ -30,6 +30,8 @@ const programRoutes = require('./routes/programs');
 const visitorRoutes = require('./routes/visitors');
 const aiRoutes = require('./routes/ai');
 
+const maintenanceGuard = require('./middleware/maintenance');
+
 const app = express();
 
 // CORS — allow only the configured React frontend origin, with credentials.
@@ -46,6 +48,9 @@ app.use(cookieParser());
 
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+// Platform maintenance mode — blocks non-admin API traffic when enabled.
+app.use(maintenanceGuard);
 
 // Routes
 app.use('/api/auth', authRoutes);

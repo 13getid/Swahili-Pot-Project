@@ -17,6 +17,16 @@ api.interceptors.response.use(
     if (status === 401 && !path.startsWith('/attend') && !path.startsWith('/login') && !isAuthCheck) {
       window.location.href = '/login';
     }
+    // Platform maintenance mode — non-admin traffic is rejected with 503 and a
+    // { maintenance: true } flag. Send the user to the maintenance screen.
+    if (status === 503 && err.response?.data?.maintenance && path !== '/maintenance') {
+      try {
+        sessionStorage.setItem('maintenance_message', err.response.data.error || '');
+      } catch {
+        /* ignore storage errors */
+      }
+      window.location.href = '/maintenance';
+    }
     return Promise.reject(err);
   }
 );

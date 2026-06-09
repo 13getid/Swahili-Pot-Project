@@ -18,6 +18,9 @@ import {
   ClipboardList,
   BarChart2,
   Award,
+  Building2,
+  ScrollText,
+  Settings,
   LogOut,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -36,9 +39,12 @@ function buildNav(user) {
   // System admin: global account management only.
   if (user.role === 'admin') {
     items.push({ to: '/users', label: 'User Management', icon: ShieldCheck });
+    items.push({ to: '/departments', label: 'Departments', icon: Building2 });
     items.push({ to: '/site', label: 'Website Content', icon: Globe });
     items.push({ to: '/visitors', label: 'Visitor Log', icon: ClipboardList });
     items.push({ to: '/certificates', label: 'Certificates', icon: Award });
+    items.push({ to: '/audit', label: 'Audit Log', icon: ScrollText });
+    items.push({ to: '/platform-settings', label: 'Platform Settings', icon: Settings });
     return items;
   }
 

@@ -4,6 +4,11 @@ export const login = (email, password) => api.post('/auth/login', { email, passw
 export const logout = () => api.post('/auth/logout');
 export const getMe = () => api.get('/auth/me');
 export const updateProfile = (data) => api.patch('/auth/profile', data);
+export const uploadProfilePhoto = (file) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  return api.put('/auth/profile/photo', fd);
+};
 export const changePassword = (data) => api.post('/auth/change-password', data);
 export const forgotPassword = (email) => api.post('/auth/forgot-password', { email });
 export const resetPassword = (token, password) =>

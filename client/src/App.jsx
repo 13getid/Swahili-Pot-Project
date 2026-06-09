@@ -19,6 +19,10 @@ import DowntimePage from './pages/downtime/DowntimePage';
 import InstructorsPage from './pages/users/InstructorsPage';
 import UsersPage from './pages/admin/UsersPage';
 import SiteContentPage from './pages/admin/SiteContentPage';
+import DepartmentsPage from './pages/admin/DepartmentsPage';
+import AuditLogPage from './pages/admin/AuditLogPage';
+import PlatformSettingsPage from './pages/admin/PlatformSettingsPage';
+import MaintenancePage from './pages/MaintenancePage';
 import ProfilePage from './pages/account/ProfilePage';
 import SettingsPage from './pages/account/SettingsPage';
 import TasksPage from './pages/tasks/TasksPage';
@@ -50,6 +54,7 @@ export default function App() {
       {/* Legal (public) */}
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/maintenance" element={<MaintenancePage />} />
       {/* Common aliases → canonical paths */}
       <Route path="/terms-of-service" element={<Navigate to="/terms" replace />} />
       <Route path="/privacy-policy" element={<Navigate to="/privacy" replace />} />
@@ -230,6 +235,30 @@ export default function App() {
           element={
             <RoleRoute roles={['admin']}>
               <SiteContentPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/departments"
+          element={
+            <RoleRoute roles={['admin']}>
+              <DepartmentsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/audit"
+          element={
+            <RoleRoute roles={['admin']}>
+              <AuditLogPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/platform-settings"
+          element={
+            <RoleRoute roles={['admin']}>
+              <PlatformSettingsPage />
             </RoleRoute>
           }
         />

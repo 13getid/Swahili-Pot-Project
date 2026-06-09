@@ -60,6 +60,48 @@ async function runOnce() {
     await client.query('ALTER TABLE tasks ADD COLUMN IF NOT EXISTS program_id INTEGER REFERENCES programs(id) ON DELETE SET NULL');
     await client.query('ALTER TABLE session_logs ADD COLUMN IF NOT EXISTS program_id INTEGER REFERENCES programs(id) ON DELETE SET NULL');
 
+    // --- Delta 3: profile fields + system audit log + platform settings ---
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMPTZ');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_url VARCHAR(500)');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_storage VARCHAR(10)');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20)');
+    await client.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT');
+
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id SERIAL PRIMARY KEY,
+        actor_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        actor_name VARCHAR(150),
+        actor_role VARCHAR(20),
+        action VARCHAR(100) NOT NULL,
+        target_type VARCHAR(50),
+        target_id INTEGER,
+        target_description VARCHAR(255),
+        ip_address VARCHAR(45),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_audit_log_actor ON audit_log(actor_id)');
+
+    // Platform settings live in the existing site_settings table under a single
+    // JSON row (key = 'platform'), so we reuse the CMS storage rather than add
+    // a parallel table.
+    await client.query(
+      `INSERT INTO site_settings (key, value)
+       VALUES ('platform', $1::jsonb)
+       ON CONFLICT (key) DO NOTHING`,
+      [
+        JSON.stringify({
+          maintenance_mode: false,
+          attendance_expiry_hours: 3,
+          max_file_size_mb: 10,
+          downtime_escalation_hours: 2,
+          org_name: 'Swahilipot Hub Foundation',
+          org_email: 'info@swahilipothub.co.ke',
+        }),
+      ]
+    );
+
     // Intentional startup logging.
     console.log('Database migration complete — all tables ensured.');
   } finally {

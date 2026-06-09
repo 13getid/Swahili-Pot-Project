@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { FileText, Download, Edit3, Loader2, CheckCircle, ArrowLeft } from 'lucide-react';
-import { generateReport, saveReport } from '../api/ai';
+import { FileText, Download, Edit3, Loader2, CheckCircle, ArrowLeft, Lock } from 'lucide-react';
+import { saveReport, reportStreamUrl, reportExportUrl } from '../api/ai';
+import { streamAIRequest } from '../utils/streamAI';
 import { useToast } from '../components/ui/Toast';
 
 export default function AIReportsPage() {
@@ -12,116 +13,151 @@ export default function AIReportsPage() {
   const type = searchParams.get('type') || 'progress';
 
   const [generating, setGenerating] = useState(false);
-  const [report, setReport] = useState(null);
+  const [reportId, setReportId] = useState(null);
+  const [status, setStatus] = useState('draft');
   const [narrative, setNarrative] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const started = useRef(false);
 
-  const generate = async () => {
+  const isCompletion = type === 'completion';
+
+  const generate = () => {
     setGenerating(true);
-    try {
-      const { data } = await generateReport(attacheeId, type);
-      setReport(data.report);
-      setNarrative(data.report.supervisor_edits || data.report.ai_narrative);
-    } catch (err) {
-      show(err.response?.data?.error || 'Failed to generate report', 'error');
-    } finally {
-      setGenerating(false);
-    }
+    setNarrative('');
+    setReportId(null);
+    setStatus('draft');
+    streamAIRequest({
+      url: reportStreamUrl(attacheeId),
+      body: { report_type: type },
+      onChunk: (chunk) => setNarrative((prev) => prev + chunk),
+      onDone: (data) => {
+        setReportId(data.report_id);
+        setGenerating(false);
+      },
+      onError: (msg) => {
+        show(msg || 'Failed to generate report', 'error');
+        setGenerating(false);
+      },
+    });
   };
 
   useEffect(() => {
-    if (attacheeId) generate();
+    if (attacheeId && !started.current) {
+      started.current = true;
+      generate();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const save = async () => {
-    if (!report) return;
+  const save = async (finalize = false) => {
+    if (!reportId) return;
     setSaving(true);
     try {
-      const { data } = await saveReport(report.id, { supervisor_edits: narrative });
-      setReport(data.report);
+      const payload = { supervisor_edits: narrative };
+      if (finalize) payload.status = 'finalized';
+      const { data } = await saveReport(reportId, payload);
+      setStatus(data.report.status);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
+      if (finalize) show('Report finalized');
     } catch (err) {
-      show(err.response?.data?.error || 'Failed to save edits', 'error');
+      show(err.response?.data?.error || 'Failed to save', 'error');
     } finally {
       setSaving(false);
     }
   };
 
-  const isCompletion = type === 'completion';
-
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <div className="flex items-center gap-3">
-        <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-          <ArrowLeft className="w-4 h-4 text-gray-600 dark:text-gray-400" />
+        <button onClick={() => navigate(-1)} className="p-2 rounded-lg hover:bg-hover transition-colors">
+          <ArrowLeft className="w-4 h-4 text-subtle" />
         </button>
         <div>
           <div className="flex items-center gap-2">
-            <FileText className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
-            <h1 className="text-xl font-semibold text-gray-900 dark:text-white">
+            <FileText className="w-5 h-5 text-brand-600" />
+            <h1 className="text-xl font-semibold text-ink">
               {isCompletion ? 'Completion Letter' : 'Progress Report'}
             </h1>
           </div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+          <p className="text-sm text-subtle mt-0.5">
             AI-generated via NVIDIA NIM — review and edit before exporting
           </p>
         </div>
       </div>
 
-      {generating && (
-        <div className="flex items-center justify-center h-48 gap-3">
-          <Loader2 className="w-6 h-6 animate-spin text-indigo-600 dark:text-indigo-400" />
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Generating {isCompletion ? 'completion letter' : 'progress report'}…
-          </p>
-        </div>
-      )}
-
-      {report && !generating && (
-        <div className="space-y-4">
-          <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl p-3">
-            <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-              <Edit3 className="w-3.5 h-3.5" />
-              Review the narrative below. Edit directly before exporting.
-            </p>
-          </div>
-
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-6 space-y-3">
-            <h2 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+      <div className="space-y-4">
+        <div className="rounded-xl border border-line bg-card p-6 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xs font-semibold text-subtle uppercase tracking-wide">
               AI Narrative — edit as needed
             </h2>
-            <textarea
-              value={narrative}
-              onChange={(e) => setNarrative(e.target.value)}
-              rows={14}
-              className="w-full text-sm text-gray-800 dark:text-gray-200 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-4 focus:outline-none focus:border-indigo-400 dark:focus:border-indigo-500 leading-relaxed resize-none"
-            />
+            {generating && (
+              <span className="flex items-center gap-1.5 text-xs text-subtle">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-600" /> Generating…
+              </span>
+            )}
+            {status === 'finalized' && (
+              <span className="flex items-center gap-1 text-xs text-[#16a34a]">
+                <Lock className="w-3.5 h-3.5" /> Finalized
+              </span>
+            )}
           </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={save}
-              disabled={saving}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
-            >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" />
-                : saved ? <CheckCircle className="w-4 h-4" />
-                : <Edit3 className="w-4 h-4" />}
-              {saved ? 'Saved' : 'Save Edits'}
-            </button>
-            <button
-              onClick={() => window.print()}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 text-sm font-medium transition-colors text-gray-700 dark:text-gray-300"
-            >
-              <Download className="w-4 h-4" />
-              Export PDF
-            </button>
-          </div>
+          <textarea
+            value={narrative}
+            onChange={(e) => setNarrative(e.target.value)}
+            rows={16}
+            readOnly={generating || status === 'finalized'}
+            placeholder={generating ? 'Writing the report…' : ''}
+            className="w-full text-sm text-ink bg-canvas border border-line rounded-lg p-4 focus:outline-none focus:border-brand-500 leading-relaxed resize-none read-only:opacity-90"
+          />
+          <p className="text-[11px] text-subtle">
+            AI-assisted draft via NVIDIA NIM · review and approve before sharing.
+          </p>
         </div>
-      )}
+
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            onClick={() => save(false)}
+            disabled={saving || generating || !reportId || status === 'finalized'}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium transition-colors disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" />
+              : saved ? <CheckCircle className="w-4 h-4" />
+              : <Edit3 className="w-4 h-4" />}
+            {saved ? 'Saved' : 'Save Edits'}
+          </button>
+
+          {status !== 'finalized' && (
+            <button
+              onClick={() => save(true)}
+              disabled={saving || generating || !reportId}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-line hover:bg-hover text-sm font-medium transition-colors text-ink disabled:opacity-50"
+            >
+              <Lock className="w-4 h-4" /> Finalize
+            </button>
+          )}
+
+          <button
+            onClick={() => window.open(reportExportUrl(reportId), '_blank')}
+            disabled={!reportId || generating}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl border border-line hover:bg-hover text-sm font-medium transition-colors text-ink disabled:opacity-50"
+          >
+            <Download className="w-4 h-4" /> Export PDF
+          </button>
+
+          {!generating && (
+            <button
+              onClick={generate}
+              disabled={saving}
+              className="text-sm text-subtle hover:text-ink transition-colors disabled:opacity-50"
+            >
+              Regenerate
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

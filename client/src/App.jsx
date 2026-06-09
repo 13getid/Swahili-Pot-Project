@@ -38,6 +38,8 @@ import ProgramsPage from './pages/programs/ProgramsPage';
 import VisitorLogPage from './pages/visitors/VisitorLogPage';
 import AttacheeProfilePage from './pages/AttacheeProfilePage';
 import AIReportsPage from './pages/AIReportsPage';
+import AssistantPage from './pages/ai/AssistantPage';
+import AIUsagePage from './pages/admin/AIUsagePage';
 import TermsPage from './pages/legal/TermsPage';
 import PrivacyPage from './pages/legal/PrivacyPage';
 
@@ -137,6 +139,14 @@ export default function App() {
           element={
             <RoleRoute roles={['supervisor']}>
               <AIReportsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/ai/assistant"
+          element={
+            <RoleRoute roles={['supervisor']}>
+              <AssistantPage />
             </RoleRoute>
           }
         />
@@ -259,6 +269,14 @@ export default function App() {
           element={
             <RoleRoute roles={['admin']}>
               <PlatformSettingsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/admin/ai-usage"
+          element={
+            <RoleRoute roles={['admin']}>
+              <AIUsagePage />
             </RoleRoute>
           }
         />

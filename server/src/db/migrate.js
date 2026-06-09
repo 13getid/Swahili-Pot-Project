@@ -98,9 +98,47 @@ async function runOnce() {
           downtime_escalation_hours: 2,
           org_name: 'Swahilipot Hub Foundation',
           org_email: 'info@swahilipothub.co.ke',
+          system_ai_enabled: true,
         }),
       ]
     );
+
+    // --- Delta 4: AI usage log + threaded supervisor conversations ---
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ai_usage_log (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+        feature VARCHAR(100) NOT NULL,
+        tokens_used INTEGER,
+        duration_ms INTEGER,
+        success BOOLEAN NOT NULL DEFAULT true,
+        error_message TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_ai_usage_created ON ai_usage_log(created_at DESC)');
+    await client.query('CREATE INDEX IF NOT EXISTS idx_ai_usage_feature ON ai_usage_log(feature)');
+
+    // Threaded supervisor assistant conversations (supersedes the flat
+    // supervisor_ai_chats history; that table is left in place for back-compat).
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS ai_conversations (
+        id SERIAL PRIMARY KEY,
+        supervisor_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        department_id INTEGER NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
+        title VARCHAR(160),
+        messages JSONB NOT NULL DEFAULT '[]',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+    await client.query('CREATE INDEX IF NOT EXISTS idx_ai_conversations_sup ON ai_conversations(supervisor_id, updated_at DESC)');
+
+    // Add the global AI on/off switch to the platform settings JSON blob if the
+    // row already exists without it (the INSERT above only seeds new databases).
+    await client.query(`
+      UPDATE site_settings
+         SET value = value || '{"system_ai_enabled": true}'::jsonb
+       WHERE key = 'platform' AND NOT (value ? 'system_ai_enabled')`);
 
     // Intentional startup logging.
     console.log('Database migration complete — all tables ensured.');

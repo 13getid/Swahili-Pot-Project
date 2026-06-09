@@ -21,6 +21,7 @@ import {
   Building2,
   ScrollText,
   Settings,
+  Sparkles,
   LogOut,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -44,6 +45,7 @@ function buildNav(user) {
     items.push({ to: '/visitors', label: 'Visitor Log', icon: ClipboardList });
     items.push({ to: '/certificates', label: 'Certificates', icon: Award });
     items.push({ to: '/audit', label: 'Audit Log', icon: ScrollText });
+    items.push({ to: '/admin/ai-usage', label: 'AI Usage', icon: Sparkles });
     items.push({ to: '/platform-settings', label: 'Platform Settings', icon: Settings });
     return items;
   }
@@ -86,6 +88,7 @@ function buildNav(user) {
     items.push({ to: '/instructors', label: 'Instructors', icon: UserCog });
     items.push({ to: '/performance', label: 'Performance', icon: BarChart2 });
     items.push({ to: '/certificates', label: 'Certificates', icon: Award });
+    items.push({ to: '/ai/assistant', label: 'AI Assistant', icon: Sparkles });
   }
 
   return items;

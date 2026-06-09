@@ -2,6 +2,7 @@
 
 const express = require('express');
 const crypto = require('crypto');
+const PDFDocument = require('pdfkit');
 const pool = require('../db/pool');
 const verifyToken = require('../middleware/auth');
 const requireRole = require('../middleware/requireRole');
@@ -10,17 +11,32 @@ const { buildAttacheeContext, buildDepartmentContext } = require('../services/ai
 const {
   generateAttacheeProfile,
   generateReportNarrative,
+  streamReportNarrative,
   streamSupervisorAnswer,
 } = require('../services/aiService');
+const logAIUsage = require('../services/aiUsage');
+const { getSetting } = require('../lib/platformSettings');
 
 const router = express.Router();
 
 const NOT_CONFIGURED = 'The AI features are not configured yet. Set NVIDIA_NIM_API_KEY on the server.';
+const AI_DISABLED = 'AI features are currently disabled by the system administrator.';
 
 // Block AI-generation endpoints when no key is present (rest of app unaffected).
 function requireAiConfigured(req, res, next) {
   if (!isConfigured()) return res.status(503).json({ error: NOT_CONFIGURED });
   return next();
+}
+
+// Block AI-generation endpoints when the system admin has turned AI off.
+async function requireAiEnabled(req, res, next) {
+  try {
+    const enabled = await getSetting('system_ai_enabled');
+    if (enabled === false) return res.status(503).json({ error: AI_DISABLED });
+    return next();
+  } catch {
+    return next(); // never let the gate itself break the request
+  }
 }
 
 // ── ATTACHEE INTELLIGENCE PROFILE ────────────────────────────────────────────
@@ -59,11 +75,35 @@ router.get(
         });
       }
 
-      // No cache → must generate, which needs a configured key.
+      // No cache → must generate, which needs a configured + enabled AI.
       if (!isConfigured()) return res.status(503).json({ error: NOT_CONFIGURED });
+      if ((await getSetting('system_ai_enabled')) === false) {
+        return res.status(503).json({ error: AI_DISABLED });
+      }
 
+      const startedAt = Date.now();
       const context = await buildAttacheeContext(attacheeId, departmentId);
-      const profile = await generateAttacheeProfile(context);
+      let profile;
+      try {
+        profile = await generateAttacheeProfile(context);
+      } catch (genErr) {
+        logAIUsage({
+          user_id: req.user.id,
+          department_id: departmentId,
+          feature: 'profile_generation',
+          duration_ms: Date.now() - startedAt,
+          success: false,
+          error_message: genErr.message,
+        });
+        throw genErr;
+      }
+      logAIUsage({
+        user_id: req.user.id,
+        department_id: departmentId,
+        feature: 'profile_generation',
+        duration_ms: Date.now() - startedAt,
+        success: true,
+      });
       const hash = crypto.createHash('sha256').update(context).digest('hex');
 
       await pool.query(
@@ -137,6 +177,7 @@ router.post(
   verifyToken,
   requireRole('supervisor'),
   requireAiConfigured,
+  requireAiEnabled,
   async (req, res, next) => {
     try {
       const attacheeId = parseInt(req.params.attacheeId, 10);
@@ -155,8 +196,29 @@ router.post(
       );
       if (!check.rows.length) return res.status(404).json({ error: 'Attachee not found' });
 
+      const startedAt = Date.now();
       const context = await buildAttacheeContext(attacheeId, departmentId);
-      const narrative = await generateReportNarrative(context, report_type);
+      let narrative;
+      try {
+        narrative = await generateReportNarrative(context, report_type);
+      } catch (genErr) {
+        logAIUsage({
+          user_id: req.user.id,
+          department_id: departmentId,
+          feature: 'report_generation',
+          duration_ms: Date.now() - startedAt,
+          success: false,
+          error_message: genErr.message,
+        });
+        throw genErr;
+      }
+      logAIUsage({
+        user_id: req.user.id,
+        department_id: departmentId,
+        feature: 'report_generation',
+        duration_ms: Date.now() - startedAt,
+        success: true,
+      });
 
       const result = await pool.query(
         `INSERT INTO ai_reports (attachee_id, department_id, report_type, generated_by, ai_narrative)
@@ -225,9 +287,13 @@ router.get(
   }
 );
 
-// ── SUPERVISOR AI ASSISTANT (STREAMING SSE) ──────────────────────────────────
+// ── SUPERVISOR AI ASSISTANT (STREAMING SSE, THREADED CONVERSATIONS) ───────────
 
-// POST /api/ai/assistant
+const CONV_HISTORY_CAP = 20; // messages of context sent to the model
+
+// POST /api/ai/assistant — ask a question within (optionally) a conversation.
+// Body: { question, conversation_id? }. A new conversation is created when no id
+// is given; the returned `done` event carries the conversation_id.
 router.post(
   '/assistant',
   verifyToken,
@@ -235,62 +301,110 @@ router.post(
   async (req, res, next) => {
     try {
       const { question } = req.body || {};
+      let conversationId = req.body && req.body.conversation_id ? parseInt(req.body.conversation_id, 10) : null;
+      if (Number.isNaN(conversationId)) conversationId = null;
       if (!question || !question.trim()) return res.status(400).json({ error: 'Question is required' });
       if (!isConfigured()) return res.status(503).json({ error: NOT_CONFIGURED });
+      if ((await getSetting('system_ai_enabled')) === false) {
+        return res.status(503).json({ error: AI_DISABLED });
+      }
 
       const supervisorId = req.user.id;
       const departmentId = req.user.department_id;
+
+      // Load the existing thread (ownership-scoped) if one was supplied.
+      let priorMessages = [];
+      if (conversationId) {
+        const conv = await pool.query(
+          'SELECT messages FROM ai_conversations WHERE id = $1 AND supervisor_id = $2',
+          [conversationId, supervisorId]
+        );
+        if (!conv.rows.length) return res.status(404).json({ error: 'Conversation not found' });
+        priorMessages = Array.isArray(conv.rows[0].messages) ? conv.rows[0].messages : [];
+      }
 
       // Open the SSE pipe IMMEDIATELY (before any DB / model work) so reverse
       // proxies don't buffer and the client gets instant feedback.
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache, no-transform');
       res.setHeader('Connection', 'keep-alive');
-      // Tell Nginx (and similar proxies) not to buffer this response.
       res.setHeader('X-Accel-Buffering', 'no');
       res.flushHeaders();
-      res.write(': connected\n\n'); // comment event — flushes the pipe through proxies
+      res.write(': connected\n\n');
 
-      // Keep-alive comments defeat idle buffering/timeouts while the model thinks.
       const keepAlive = setInterval(() => {
         if (!res.writableEnded) res.write(': ping\n\n');
       }, 15000);
 
-      try {
-        const historyResult = await pool.query(
-          `SELECT role, content FROM supervisor_ai_chats
-            WHERE supervisor_id = $1 ORDER BY created_at DESC LIMIT 10`,
-          [supervisorId]
-        );
-        const chatHistory = historyResult.rows.reverse();
+      // Stop pulling from the model if the client navigates away mid-stream.
+      let aborted = false;
+      req.on('close', () => {
+        aborted = true;
+      });
 
+      const startedAt = Date.now();
+      try {
         const departmentContext = await buildDepartmentContext(departmentId);
 
         let fullResponse = '';
         await streamSupervisorAnswer({
           question: question.trim(),
           departmentContext,
-          chatHistory,
+          chatHistory: priorMessages.slice(-CONV_HISTORY_CAP),
           onChunk: (chunk) => {
+            if (aborted) return;
             fullResponse += chunk;
             res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
           },
         });
 
-        await pool.query(
-          `INSERT INTO supervisor_ai_chats (supervisor_id, department_id, role, content)
-           VALUES ($1,$2,'user',$3), ($1,$2,'assistant',$4)`,
-          [supervisorId, departmentId, question.trim(), fullResponse]
-        );
+        // Persist the turn into the threaded conversation.
+        const updatedMessages = [
+          ...priorMessages,
+          { role: 'user', content: question.trim() },
+          { role: 'assistant', content: fullResponse },
+        ].slice(-100); // hard cap stored history
 
-        res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+        if (conversationId) {
+          await pool.query(
+            'UPDATE ai_conversations SET messages = $1::jsonb, updated_at = NOW() WHERE id = $2',
+            [JSON.stringify(updatedMessages), conversationId]
+          );
+        } else {
+          const title = question.trim().slice(0, 80);
+          const ins = await pool.query(
+            `INSERT INTO ai_conversations (supervisor_id, department_id, title, messages)
+             VALUES ($1, $2, $3, $4::jsonb) RETURNING id`,
+            [supervisorId, departmentId, title, JSON.stringify(updatedMessages)]
+          );
+          conversationId = ins.rows[0].id;
+        }
+
+        logAIUsage({
+          user_id: supervisorId,
+          department_id: departmentId,
+          feature: 'assistant_chat',
+          duration_ms: Date.now() - startedAt,
+          success: true,
+        });
+
+        res.write(`data: ${JSON.stringify({ done: true, conversation_id: conversationId })}\n\n`);
+      } catch (streamErr) {
+        logAIUsage({
+          user_id: supervisorId,
+          department_id: departmentId,
+          feature: 'assistant_chat',
+          duration_ms: Date.now() - startedAt,
+          success: false,
+          error_message: streamErr.message,
+        });
+        throw streamErr;
       } finally {
         clearInterval(keepAlive);
       }
       return res.end();
     } catch (err) {
       console.error('[AI assistant]', err.message);
-      // If headers already sent (streaming started), surface the error over SSE.
       if (res.headersSent) {
         res.write(`data: ${JSON.stringify({ error: 'AI assistant failed — check NVIDIA NIM API key and rate limits' })}\n\n`);
         return res.end();
@@ -300,13 +414,81 @@ router.post(
   }
 );
 
-// DELETE /api/ai/assistant/history
+// GET /api/ai/assistant/conversations — list the supervisor's threads
+router.get(
+  '/assistant/conversations',
+  verifyToken,
+  requireRole('supervisor'),
+  async (req, res, next) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT id, title, created_at, updated_at,
+                jsonb_array_length(messages) AS message_count
+           FROM ai_conversations
+          WHERE supervisor_id = $1
+          ORDER BY updated_at DESC
+          LIMIT 100`,
+        [req.user.id]
+      );
+      return res.json({ conversations: rows });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+// GET /api/ai/assistant/conversations/:id — full thread
+router.get(
+  '/assistant/conversations/:id',
+  verifyToken,
+  requireRole('supervisor'),
+  async (req, res, next) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid conversation id' });
+      const { rows } = await pool.query(
+        'SELECT id, title, messages, created_at, updated_at FROM ai_conversations WHERE id = $1 AND supervisor_id = $2',
+        [id, req.user.id]
+      );
+      if (!rows.length) return res.status(404).json({ error: 'Conversation not found' });
+      return res.json({ conversation: rows[0] });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+// DELETE /api/ai/assistant/conversations/:id — delete one thread
+router.delete(
+  '/assistant/conversations/:id',
+  verifyToken,
+  requireRole('supervisor'),
+  async (req, res, next) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid conversation id' });
+      const { rowCount } = await pool.query(
+        'DELETE FROM ai_conversations WHERE id = $1 AND supervisor_id = $2',
+        [id, req.user.id]
+      );
+      if (rowCount === 0) return res.status(404).json({ error: 'Conversation not found' });
+      return res.json({ message: 'Conversation deleted' });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+// DELETE /api/ai/assistant/history — clear ALL threads (back-compat for the
+// dashboard widget's "clear" button).
 router.delete(
   '/assistant/history',
   verifyToken,
   requireRole('supervisor'),
   async (req, res, next) => {
     try {
+      await pool.query('DELETE FROM ai_conversations WHERE supervisor_id = $1', [req.user.id]);
+      // Also clear any legacy flat history.
       await pool.query('DELETE FROM supervisor_ai_chats WHERE supervisor_id = $1', [req.user.id]);
       return res.json({ message: 'Chat history cleared' });
     } catch (err) {
@@ -314,5 +496,296 @@ router.delete(
     }
   }
 );
+
+// ── AI REPORT: STREAMING GENERATION (SSE) ────────────────────────────────────
+
+// POST /api/ai/attachees/:attacheeId/reports/stream — generate a report draft
+// token-by-token over SSE, saving it when complete. The `done` event carries
+// the new report_id.
+router.post(
+  '/attachees/:attacheeId/reports/stream',
+  verifyToken,
+  requireRole('supervisor'),
+  async (req, res, next) => {
+    try {
+      const attacheeId = parseInt(req.params.attacheeId, 10);
+      if (Number.isNaN(attacheeId)) return res.status(400).json({ error: 'Invalid attachee id' });
+      const { report_type } = req.body || {};
+      const departmentId = req.user.department_id;
+
+      if (!['progress', 'completion'].includes(report_type)) {
+        return res.status(400).json({ error: 'report_type must be "progress" or "completion"' });
+      }
+      if (!isConfigured()) return res.status(503).json({ error: NOT_CONFIGURED });
+      if ((await getSetting('system_ai_enabled')) === false) {
+        return res.status(503).json({ error: AI_DISABLED });
+      }
+
+      const check = await pool.query(
+        'SELECT id FROM trainees WHERE id = $1 AND department_id = $2',
+        [attacheeId, departmentId]
+      );
+      if (!check.rows.length) return res.status(404).json({ error: 'Attachee not found' });
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+      res.write(': connected\n\n');
+
+      const keepAlive = setInterval(() => {
+        if (!res.writableEnded) res.write(': ping\n\n');
+      }, 15000);
+
+      let aborted = false;
+      req.on('close', () => {
+        aborted = true;
+      });
+
+      const startedAt = Date.now();
+      try {
+        const context = await buildAttacheeContext(attacheeId, departmentId);
+        let fullText = '';
+        await streamReportNarrative({
+          attacheeContext: context,
+          reportType: report_type,
+          onChunk: (chunk) => {
+            if (aborted) return;
+            fullText += chunk;
+            res.write(`data: ${JSON.stringify({ chunk })}\n\n`);
+          },
+        });
+
+        const saved = await pool.query(
+          `INSERT INTO ai_reports (attachee_id, department_id, report_type, generated_by, ai_narrative)
+           VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+          [attacheeId, departmentId, report_type, req.user.id, fullText]
+        );
+
+        logAIUsage({
+          user_id: req.user.id,
+          department_id: departmentId,
+          feature: 'report_generation',
+          duration_ms: Date.now() - startedAt,
+          success: true,
+        });
+
+        res.write(`data: ${JSON.stringify({ done: true, report_id: saved.rows[0].id })}\n\n`);
+      } catch (streamErr) {
+        logAIUsage({
+          user_id: req.user.id,
+          department_id: departmentId,
+          feature: 'report_generation',
+          duration_ms: Date.now() - startedAt,
+          success: false,
+          error_message: streamErr.message,
+        });
+        throw streamErr;
+      } finally {
+        clearInterval(keepAlive);
+      }
+      return res.end();
+    } catch (err) {
+      console.error('[AI report stream]', err.message);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: 'Report generation failed — please try again.' })}\n\n`);
+        return res.end();
+      }
+      return next(err);
+    }
+  }
+);
+
+// ── AI REPORT: PDF EXPORT ────────────────────────────────────────────────────
+
+const PDF_BRAND = '#1e40af';
+const PDF_INK = '#374151';
+const PDF_MUTED = '#6b7280';
+const REPORT_TITLES = {
+  progress: 'ATTACHMENT PROGRESS REPORT',
+  completion: 'LETTER OF ATTACHMENT COMPLETION',
+};
+
+// GET /api/ai/reports/:reportId/export — supervisor downloads a formatted PDF.
+// Uses supervisor_edits when present, otherwise the original AI draft.
+router.get(
+  '/reports/:reportId/export',
+  verifyToken,
+  requireRole('supervisor'),
+  async (req, res, next) => {
+    try {
+      const reportId = parseInt(req.params.reportId, 10);
+      if (Number.isNaN(reportId)) return res.status(400).json({ error: 'Invalid report id' });
+
+      const { rows } = await pool.query(
+        `SELECT r.*, t.name AS attachee_name, d.name AS department_name, u.name AS supervisor_name
+           FROM ai_reports r
+           JOIN trainees t ON t.id = r.attachee_id
+           JOIN departments d ON d.id = r.department_id
+           JOIN users u ON u.id = r.generated_by
+          WHERE r.id = $1 AND r.department_id = $2`,
+        [reportId, req.user.department_id]
+      );
+      const report = rows[0];
+      if (!report) return res.status(404).json({ error: 'Report not found' });
+
+      const body = (report.supervisor_edits && report.supervisor_edits.trim()) || report.ai_narrative || '';
+      const safeName = String(report.attachee_name).replace(/[^a-z0-9]+/gi, '-');
+      const dateStr = new Date().toISOString().slice(0, 10);
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${safeName}-${report.report_type}-report-${dateStr}.pdf"`
+      );
+
+      const doc = new PDFDocument({ size: 'A4', margin: 72 });
+      doc.on('error', next);
+      doc.pipe(res);
+
+      // Header
+      const top = doc.y;
+      doc.fillColor(PDF_BRAND).font('Helvetica-Bold').fontSize(20).text('SwahiliPot', { continued: true });
+      doc.fillColor(PDF_INK).font('Helvetica').fontSize(14).text(' Hub Foundation');
+      doc.fillColor(PDF_MUTED).fontSize(9)
+        .text('Swahili Cultural Centre, Sir Mbarak Hinaway Rd, Old Town, Mombasa');
+      doc.text('swahilipothub.co.ke | info@swahilipothub.co.ke');
+      doc.fillColor(PDF_INK).fontSize(10).text(longDatePDF(new Date()), 72, top, { align: 'right' });
+      doc.moveDown(1);
+      let y = doc.y;
+      doc.strokeColor(PDF_BRAND).lineWidth(1).moveTo(72, y).lineTo(doc.page.width - 72, y).stroke();
+      doc.moveDown(1.5);
+
+      // Title + subject
+      doc.fillColor(PDF_BRAND).font('Helvetica-Bold').fontSize(14)
+        .text(REPORT_TITLES[report.report_type] || 'ATTACHMENT REPORT', { align: 'center' });
+      doc.moveDown(0.4);
+      doc.fillColor(PDF_INK).font('Helvetica-Bold').fontSize(12).text(report.attachee_name, { align: 'center' });
+      doc.fillColor(PDF_MUTED).font('Helvetica').fontSize(10).text(report.department_name, { align: 'center' });
+      doc.moveDown(0.8);
+      y = doc.y;
+      doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(72, y).lineTo(doc.page.width - 72, y).stroke();
+      doc.moveDown(1);
+
+      // Body — render UPPERCASE-heading lines in bold, paragraphs in regular.
+      doc.fillColor(PDF_INK);
+      const blocks = body.split(/\n\s*\n/);
+      for (const block of blocks) {
+        const trimmed = block.trim();
+        if (!trimmed) continue;
+        const headingMatch = /^([A-Z][A-Z \/&]{3,}):?\s*$/.test(trimmed);
+        if (headingMatch) {
+          doc.font('Helvetica-Bold').fontSize(11).text(trimmed.replace(/:$/, ''));
+          doc.moveDown(0.3);
+        } else {
+          doc.font('Helvetica').fontSize(10).text(trimmed, { align: 'justify', lineGap: 3 });
+          doc.moveDown(0.7);
+        }
+      }
+
+      // Footer signature
+      doc.moveDown(2);
+      doc.strokeColor('#9ca3af').lineWidth(1).moveTo(72, doc.y).lineTo(72 + 150, doc.y).stroke();
+      doc.moveDown(0.4);
+      doc.fillColor(PDF_INK).font('Helvetica-Bold').fontSize(11).text(report.supervisor_name, 72, doc.y);
+      doc.font('Helvetica').fontSize(10).fillColor(PDF_MUTED).text('Department Supervisor');
+      doc.fontSize(9).fillColor(PDF_MUTED)
+        .text('AI-assisted draft via NVIDIA NIM · reviewed and approved by the supervisor', { align: 'left' });
+
+      const lineY = doc.page.height - 60;
+      doc.strokeColor(PDF_BRAND).lineWidth(1).moveTo(72, lineY).lineTo(doc.page.width - 72, lineY).stroke();
+
+      doc.end();
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
+
+const PDF_MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+function longDatePDF(d) {
+  return `${String(d.getUTCDate()).padStart(2, '0')} ${PDF_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+// ── AI USAGE STATS (SYSTEM ADMIN) ────────────────────────────────────────────
+
+// GET /api/ai/usage/enabled — any authenticated user; drives UI visibility.
+router.get('/usage/enabled', verifyToken, async (req, res, next) => {
+  try {
+    const settingEnabled = (await getSetting('system_ai_enabled')) !== false;
+    return res.json({ enabled: settingEnabled && isConfigured(), configured: isConfigured() });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+// GET /api/ai/usage — admin only; aggregated AI usage statistics.
+router.get('/usage', verifyToken, requireRole('admin'), async (req, res, next) => {
+  try {
+    const conditions = [];
+    const params = [];
+    if (req.query.from) {
+      params.push(req.query.from);
+      conditions.push(`created_at >= $${params.length}`);
+    }
+    if (req.query.to) {
+      params.push(req.query.to);
+      conditions.push(`created_at <= $${params.length}`);
+    }
+    if (req.query.feature) {
+      params.push(req.query.feature);
+      conditions.push(`feature = $${params.length}`);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const totals = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total_calls,
+         COUNT(CASE WHEN success THEN 1 END)::int AS successful_calls,
+         COUNT(CASE WHEN NOT success THEN 1 END)::int AS failed_calls,
+         COALESCE(SUM(tokens_used), 0)::int AS total_tokens
+       FROM ai_usage_log ${where}`,
+      params
+    );
+
+    const byFeature = await pool.query(
+      `SELECT feature,
+              COUNT(*)::int AS calls,
+              COUNT(CASE WHEN success THEN 1 END)::int AS successful,
+              COALESCE(SUM(tokens_used), 0)::int AS tokens,
+              ROUND(AVG(duration_ms))::int AS avg_duration_ms
+         FROM ai_usage_log ${where}
+        GROUP BY feature
+        ORDER BY calls DESC`,
+      params
+    );
+
+    const byDay = await pool.query(
+      `SELECT TO_CHAR(DATE(created_at), 'YYYY-MM-DD') AS date,
+              COUNT(*)::int AS calls,
+              COALESCE(SUM(tokens_used), 0)::int AS tokens
+         FROM ai_usage_log ${where}
+        GROUP BY DATE(created_at)
+        ORDER BY DATE(created_at)`,
+      params
+    );
+
+    const enabled = (await getSetting('system_ai_enabled')) !== false;
+
+    return res.json({
+      ...totals.rows[0],
+      ai_enabled: enabled,
+      configured: isConfigured(),
+      by_feature: byFeature.rows,
+      by_day: byDay.rows,
+    });
+  } catch (err) {
+    return next(err);
+  }
+});
 
 module.exports = router;

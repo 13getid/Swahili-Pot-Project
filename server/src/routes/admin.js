@@ -518,6 +518,9 @@ router.put('/settings', async (req, res, next) => {
     if (body.maintenance_message !== undefined) {
       patch.maintenance_message = String(body.maintenance_message || '').slice(0, 300) || null;
     }
+    if (body.system_ai_enabled !== undefined) {
+      patch.system_ai_enabled = body.system_ai_enabled === true || body.system_ai_enabled === 'true';
+    }
     const numericFields = {
       attendance_expiry_hours: [1, 24],
       max_file_size_mb: [1, 50],

@@ -119,9 +119,23 @@ Rules:
  * Generate a narrative paragraph block for a progress or completion report.
  */
 async function generateReportNarrative(attacheeContext, reportType) {
-  const isCompletion = reportType === 'completion';
+  return completeWithFallback({
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: buildReportPrompt(attacheeContext, reportType) },
+    ],
+    max_tokens: 1200,
+    temperature: 0.6,
+  });
+}
 
-  const prompt = `Based on the following attachee data, write a professional ${isCompletion ? 'attachment completion letter narrative' : 'mid-attachment progress report'}.
+/**
+ * Build the user prompt for a progress/completion report. Shared by the
+ * streaming and non-streaming generators so both produce identical output.
+ */
+function buildReportPrompt(attacheeContext, reportType) {
+  const isCompletion = reportType === 'completion';
+  return `Based on the following attachee data, write a professional ${isCompletion ? 'attachment completion letter narrative' : 'mid-attachment progress report'}.
 
 ATTACHEE DATA:
 ${attacheeContext}
@@ -141,15 +155,33 @@ Rules:
 - Only reference facts present in the data — do NOT invent details.
 - Use the attachee's actual name throughout.
 - Output body paragraphs only — no salutation, no sign-off, no headers.`;
+}
 
-  return completeWithFallback({
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
-    ],
+/**
+ * Streaming variant of the report generator. Calls onChunk(text) for each
+ * streamed token and returns the full narrative.
+ */
+async function streamReportNarrative({ attacheeContext, reportType, onChunk }) {
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: buildReportPrompt(attacheeContext, reportType) },
+  ];
+
+  const stream = await streamWithFallback({
+    messages,
     max_tokens: 1200,
     temperature: 0.6,
   });
+
+  let fullText = '';
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content || '';
+    if (delta) {
+      fullText += delta;
+      onChunk(delta);
+    }
+  }
+  return fullText;
 }
 
 /**
@@ -184,4 +216,9 @@ async function streamSupervisorAnswer({ question, departmentContext, chatHistory
   return fullText;
 }
 
-module.exports = { generateAttacheeProfile, generateReportNarrative, streamSupervisorAnswer };
+module.exports = {
+  generateAttacheeProfile,
+  generateReportNarrative,
+  streamReportNarrative,
+  streamSupervisorAnswer,
+};

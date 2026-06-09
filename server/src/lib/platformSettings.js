@@ -16,6 +16,7 @@ const DEFAULTS = {
   downtime_escalation_hours: 2,
   org_name: 'Swahilipot Hub Foundation',
   org_email: 'info@swahilipothub.co.ke',
+  system_ai_enabled: true,
 };
 
 let cache = null;

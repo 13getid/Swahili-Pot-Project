@@ -14,6 +14,7 @@ export default function SupervisorAssistant() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
+  const [conversationId, setConversationId] = useState(null);
   const bottomRef = useRef(null);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export default function SupervisorAssistant() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({ question: text, conversation_id: conversationId }),
       });
 
       // Non-streaming error responses (e.g. 503 not configured) come back as JSON.
@@ -75,6 +76,9 @@ export default function SupervisorAssistant() {
                 return copy;
               });
             }
+            if (data.done && data.conversation_id) {
+              setConversationId(data.conversation_id);
+            }
             if (data.error) {
               setMessages((prev) => {
                 const copy = [...prev];
@@ -105,6 +109,7 @@ export default function SupervisorAssistant() {
       /* ignore */
     }
     setMessages([]);
+    setConversationId(null);
   };
 
   return (

@@ -71,6 +71,14 @@ Respond ONLY with a single valid JSON object — no markdown fences, no extra te
   "overall_rating": "one of: Excellent | Strong | Developing | Needs Support",
   "engagement_score": 0-100,
   "headline": "One punchy sentence capturing who this attachee is.",
+  "competencies": {
+    "Attendance": 0-100,
+    "Punctuality": 0-100,
+    "Consistency": 0-100,
+    "Engagement": 0-100,
+    "Task Performance": 0-100,
+    "Initiative": 0-100
+  },
   "strengths": ["5 to 7 specific, evidence-backed strengths, each citing data"],
   "weaknesses": ["3 to 5 specific growth areas, each grounded in the data"],
   "behavioral_patterns": ["4 to 6 observed patterns (punctuality, rhythm, consistency, day-of-week tendencies, trend)"],
@@ -94,6 +102,7 @@ Respond ONLY with a single valid JSON object — no markdown fences, no extra te
 
 Rules:
 - Ground EVERY claim in the provided data. Cite specific numbers where possible. Do NOT invent submissions, grades, or task outcomes that are not shown.
+- competencies: score all SIX dimensions 0-100, grounded in the data (attendance volume & consistency, arrival punctuality, week-to-week consistency/streaks, programme engagement, reported task work, and self-direction/initiative). Use 50 when a dimension genuinely cannot be judged from the data. These scores power a radar chart, so keep them consistent with the strengths/weaknesses narrative — high scores are strengths, low scores are growth areas.
 - career_paths: exactly 3, ordered by confidence descending.
 - If data is thin, say so honestly in the relevant fields and keep confidence modest — but still fill every field.
 - Return ONLY the JSON object.`;

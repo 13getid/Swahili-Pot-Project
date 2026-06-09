@@ -7,8 +7,19 @@ import {
 } from '../api/ai';
 import {
   Brain, RefreshCw, Star, AlertTriangle, TrendingUp,
-  Tag, Briefcase, ChevronRight, Loader2, ArrowLeft,
+  Tag, Briefcase, ChevronRight, Loader2, ArrowLeft, Radar,
 } from 'lucide-react';
+import RadarChart from '../components/ai/RadarChart';
+
+// Display labels for the radar axes (kept short so they fit the chart).
+const COMP_SHORT = {
+  Attendance: 'Attendance',
+  Punctuality: 'Punctuality',
+  Consistency: 'Consistency',
+  Engagement: 'Engagement',
+  'Task Performance': 'Tasks',
+  Initiative: 'Initiative',
+};
 
 function parseField(field) {
   if (!field) return [];
@@ -80,6 +91,24 @@ export default function AttacheeProfilePage() {
   const riskFlags = parseField(profile.risk_flags);
   const score = typeof profile.engagement_score === 'number' ? profile.engagement_score : null;
 
+  // Competency scores → radar chart axes (peaks = strengths, dips = growth areas).
+  const competencies =
+    profile.competencies && typeof profile.competencies === 'object'
+      ? profile.competencies
+      : (() => {
+          try {
+            return JSON.parse(profile.competencies);
+          } catch {
+            return null;
+          }
+        })();
+  const radarData = competencies
+    ? Object.entries(competencies)
+        .filter(([, v]) => typeof v === 'number')
+        .slice(0, 8)
+        .map(([label, value]) => ({ label: COMP_SHORT[label] || label, fullLabel: label, value }))
+    : [];
+
   const ratingClass = {
     Excellent: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
     Strong: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400',
@@ -149,6 +178,40 @@ export default function AttacheeProfilePage() {
               : ''}
             Powered by NVIDIA NIM
           </p>
+        </div>
+      )}
+
+      {/* Competency radar — strengths vs growth areas at a glance */}
+      {radarData.length >= 3 && (
+        <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-5">
+          <div className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 mb-2">
+            <Radar className="w-4 h-4" />
+            <h3 className="font-medium text-sm">Competency Profile</h3>
+          </div>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            Each axis is scored 0–100 from this attachee’s data. Peaks are strengths; dips are growth areas.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+            <div className="flex justify-center">
+              <RadarChart data={radarData} size={300} />
+            </div>
+            <div className="space-y-2.5">
+              {radarData.map((d) => (
+                <div key={d.fullLabel} className="flex items-center gap-3">
+                  <span className="w-28 shrink-0 text-xs text-gray-600 dark:text-gray-300">{d.fullLabel}</span>
+                  <div className="h-2 flex-1 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 dark:bg-indigo-400"
+                      style={{ width: `${Math.max(0, Math.min(100, d.value))}%` }}
+                    />
+                  </div>
+                  <span className="w-8 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">
+                    {Math.round(d.value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 

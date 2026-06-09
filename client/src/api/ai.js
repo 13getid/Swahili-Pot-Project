@@ -2,8 +2,9 @@ import api from './axios';
 
 export const getAttacheeProfile = (attacheeId) =>
   api.get(`/ai/attachees/${attacheeId}/profile`);
-export const refreshAttacheeProfile = (attacheeId) =>
-  api.post(`/ai/attachees/${attacheeId}/profile/refresh`);
+// Generation streams over SSE (keep-alive) so it never hits the proxy timeout.
+export const profileGenerateUrl = (attacheeId) =>
+  `${api.defaults.baseURL}/ai/attachees/${attacheeId}/profile/generate`;
 export const generateReport = (attacheeId, reportType) =>
   api.post(`/ai/attachees/${attacheeId}/reports`, { report_type: reportType });
 export const saveReport = (reportId, data) => api.patch(`/ai/reports/${reportId}`, data);

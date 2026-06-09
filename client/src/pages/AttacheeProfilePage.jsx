@@ -1,13 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import {
-  getAttacheeProfile,
-  refreshAttacheeProfile,
-} from '../api/ai';
+import { getAttacheeProfile, profileGenerateUrl } from '../api/ai';
+import { streamAIRequest } from '../utils/streamAI';
 import {
   Brain, RefreshCw, Star, AlertTriangle, TrendingUp,
-  Tag, Briefcase, ChevronRight, Loader2, ArrowLeft, Radar,
+  Tag, Briefcase, ChevronRight, Loader2, ArrowLeft, Radar, Sparkles,
 } from 'lucide-react';
 import RadarChart from '../components/ai/RadarChart';
 
@@ -34,38 +32,65 @@ export default function AttacheeProfilePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true); // initial cache fetch
+  const [generating, setGenerating] = useState(false); // model run in progress
   const [error, setError] = useState(null);
 
-  const fetchProfile = async (refresh = false) => {
+  // Load the cached profile only — never blocks on generation.
+  const loadCached = async () => {
     setError(null);
+    setLoading(true);
     try {
-      if (refresh) {
-        setRefreshing(true);
-        await refreshAttacheeProfile(attacheeId);
-      }
-      setLoading(true);
       const { data } = await getAttacheeProfile(attacheeId);
       setProfile(data.profile);
     } catch (err) {
-      setError(err.response?.data?.error || 'Failed to load AI profile');
+      if (err.response?.status === 404) {
+        setProfile(null); // not generated yet → show the generate prompt
+      } else {
+        setError(err.response?.data?.error || 'Failed to load AI profile');
+      }
     } finally {
       setLoading(false);
-      setRefreshing(false);
     }
   };
 
+  // Generate / regenerate over SSE (keep-alive defeats proxy timeouts).
+  const generate = () => {
+    setError(null);
+    setGenerating(true);
+    streamAIRequest({
+      url: profileGenerateUrl(attacheeId),
+      body: {},
+      onDone: (d) => {
+        if (d.profile) setProfile(d.profile);
+        setGenerating(false);
+      },
+      onError: (msg) => {
+        setError(msg || 'Profile generation failed — please try again.');
+        setGenerating(false);
+      },
+    });
+  };
+
   useEffect(() => {
-    fetchProfile();
+    loadCached();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attacheeId]);
 
   if (loading) return (
     <div className="flex flex-col items-center justify-center h-64 gap-3">
       <Loader2 className="w-8 h-8 animate-spin text-indigo-600 dark:text-indigo-400" />
+      <p className="text-sm text-gray-500 dark:text-gray-400">Loading profile…</p>
+    </div>
+  );
+
+  if (generating) return (
+    <div className="flex flex-col items-center justify-center h-64 gap-3">
+      <Loader2 className="w-8 h-8 animate-spin text-indigo-600 dark:text-indigo-400" />
       <p className="text-sm text-gray-500 dark:text-gray-400">Generating AI intelligence profile…</p>
-      <p className="text-xs text-gray-400 dark:text-gray-500">Analysing attendance and programme data</p>
+      <p className="text-xs text-gray-400 dark:text-gray-500">
+        Analysing tasks, check-ins and feedback — this can take a minute.
+      </p>
     </div>
   );
 
@@ -77,10 +102,35 @@ export default function AttacheeProfilePage() {
       <div className="p-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-sm text-amber-700 dark:text-amber-400">
         {error}
       </div>
+      <button onClick={generate} className="inline-flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white">
+        <RefreshCw className="w-4 h-4" /> Try again
+      </button>
     </div>
   );
 
-  if (!profile) return null;
+  // No profile yet → invite generation.
+  if (!profile) return (
+    <div className="max-w-4xl mx-auto p-6 space-y-5">
+      <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1 text-sm text-subtle hover:text-ink">
+        <ArrowLeft className="w-4 h-4" /> Back
+      </button>
+      <div className="flex flex-col items-center justify-center gap-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-12 text-center">
+        <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 dark:bg-indigo-950/50">
+          <Sparkles className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+        </div>
+        <div>
+          <h2 className="font-display text-lg font-bold text-gray-900 dark:text-white">No intelligence profile yet</h2>
+          <p className="mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">
+            Generate an AI analysis of this attachee’s tasks, check-ins and feedback — including the
+            competency radar and suggested career paths.
+          </p>
+        </div>
+        <button onClick={generate} className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium">
+          <Brain className="w-4 h-4" /> Generate Profile
+        </button>
+      </div>
+    </div>
+  );
 
   const strengths = parseField(profile.strengths);
   const weaknesses = parseField(profile.weaknesses);
@@ -143,11 +193,11 @@ export default function AttacheeProfilePage() {
           </div>
         </div>
         <button
-          onClick={() => fetchProfile(true)}
-          disabled={refreshing}
+          onClick={generate}
+          disabled={generating}
           className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-4 h-4 ${generating ? 'animate-spin' : ''}`} />
           Refresh Analysis
         </button>
       </div>

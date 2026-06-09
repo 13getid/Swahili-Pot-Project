@@ -41,7 +41,42 @@ async function requireAiEnabled(req, res, next) {
 
 // ── ATTACHEE INTELLIGENCE PROFILE ────────────────────────────────────────────
 
-// GET /api/ai/attachees/:attacheeId/profile — cached, or generate + cache.
+// Persist (upsert) a generated profile for an attachee.
+async function saveAttacheeProfile(attacheeId, departmentId, context, profile) {
+  const hash = crypto.createHash('sha256').update(context).digest('hex');
+  await pool.query(
+    `INSERT INTO attachee_ai_profiles
+       (attachee_id, department_id, strengths, weaknesses, behavioral_patterns,
+        skill_tags, career_paths, summary, details, raw_context_hash)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     ON CONFLICT (attachee_id) DO UPDATE SET
+       strengths           = EXCLUDED.strengths,
+       weaknesses          = EXCLUDED.weaknesses,
+       behavioral_patterns = EXCLUDED.behavioral_patterns,
+       skill_tags          = EXCLUDED.skill_tags,
+       career_paths        = EXCLUDED.career_paths,
+       summary             = EXCLUDED.summary,
+       details             = EXCLUDED.details,
+       raw_context_hash    = EXCLUDED.raw_context_hash,
+       generated_at        = NOW()`,
+    [
+      attacheeId,
+      departmentId,
+      JSON.stringify(profile.strengths || []),
+      JSON.stringify(profile.weaknesses || []),
+      JSON.stringify(profile.behavioral_patterns || []),
+      profile.skill_tags || [],
+      JSON.stringify(profile.career_paths || []),
+      profile.summary || '',
+      JSON.stringify(profile),
+      hash,
+    ]
+  );
+}
+
+// GET /api/ai/attachees/:attacheeId/profile — cached profile only.
+// Generation is done via the streaming endpoint below so it never hits the
+// reverse-proxy read timeout.
 router.get(
   '/attachees/:attacheeId/profile',
   verifyToken,
@@ -52,7 +87,6 @@ router.get(
       if (Number.isNaN(attacheeId)) return res.status(400).json({ error: 'Invalid attachee id' });
       const departmentId = req.user.department_id;
 
-      // Verify ownership and grab the display name.
       const check = await pool.query(
         "SELECT id, name FROM users WHERE id = $1 AND role = 'attachee' AND department_id = $2",
         [attacheeId, departmentId]
@@ -60,33 +94,82 @@ router.get(
       if (!check.rows.length) return res.status(404).json({ error: 'Attachee not found' });
       const attacheeName = check.rows[0].name;
 
-      // Serve cache if available.
       const cached = await pool.query(
         'SELECT * FROM attachee_ai_profiles WHERE attachee_id = $1',
         [attacheeId]
       );
-      if (cached.rows.length) {
-        const row = cached.rows[0];
-        // Prefer the full rich object; fall back to legacy columns.
-        const base = row.details && typeof row.details === 'object' ? row.details : row;
-        return res.json({
-          profile: { ...base, attachee_name: attacheeName, generated_at: row.generated_at },
-          cached: true,
-        });
+      if (!cached.rows.length) {
+        return res.status(404).json({ error: 'No profile generated yet.', generated: false });
       }
+      const row = cached.rows[0];
+      const base = row.details && typeof row.details === 'object' ? row.details : row;
+      return res.json({
+        profile: { ...base, attachee_name: attacheeName, generated_at: row.generated_at },
+        cached: true,
+      });
+    } catch (err) {
+      return next(err);
+    }
+  }
+);
 
-      // No cache → must generate, which needs a configured + enabled AI.
+// POST /api/ai/attachees/:attacheeId/profile/generate — generate (or
+// regenerate) the profile over SSE. Keep-alive pings keep the connection
+// flowing so nginx never returns a 504 on the long model call. The final
+// profile is delivered in the `done` event.
+router.post(
+  '/attachees/:attacheeId/profile/generate',
+  verifyToken,
+  requireRole('instructor', 'supervisor'),
+  async (req, res, next) => {
+    try {
+      const attacheeId = parseInt(req.params.attacheeId, 10);
+      if (Number.isNaN(attacheeId)) return res.status(400).json({ error: 'Invalid attachee id' });
+      const departmentId = req.user.department_id;
+
+      const check = await pool.query(
+        "SELECT id, name FROM users WHERE id = $1 AND role = 'attachee' AND department_id = $2",
+        [attacheeId, departmentId]
+      );
+      if (!check.rows.length) return res.status(404).json({ error: 'Attachee not found' });
+      const attacheeName = check.rows[0].name;
+
       if (!isConfigured()) return res.status(503).json({ error: NOT_CONFIGURED });
       if ((await getSetting('system_ai_enabled')) === false) {
         return res.status(503).json({ error: AI_DISABLED });
       }
 
+      // Open SSE immediately so the proxy starts streaming.
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders();
+      res.write(': connected\n\n');
+      const keepAlive = setInterval(() => {
+        if (!res.writableEnded) res.write(': ping\n\n');
+      }, 10000);
+
       const startedAt = Date.now();
-      const context = await buildAttacheeContext(attacheeId, departmentId);
-      let profile;
       try {
-        profile = await generateAttacheeProfile(context);
+        const context = await buildAttacheeContext(attacheeId, departmentId);
+        const profile = await generateAttacheeProfile(context);
+        await saveAttacheeProfile(attacheeId, departmentId, context, profile);
+        logAIUsage({
+          user_id: req.user.id,
+          department_id: departmentId,
+          feature: 'profile_generation',
+          duration_ms: Date.now() - startedAt,
+          success: true,
+        });
+        res.write(
+          `data: ${JSON.stringify({
+            done: true,
+            profile: { ...profile, attachee_name: attacheeName, generated_at: new Date() },
+          })}\n\n`
+        );
       } catch (genErr) {
+        console.error('[AI profile]', genErr.message);
         logAIUsage({
           user_id: req.user.id,
           department_id: departmentId,
@@ -95,75 +178,22 @@ router.get(
           success: false,
           error_message: genErr.message,
         });
-        throw genErr;
+        const msg =
+          genErr.code === 'AI_NOT_CONFIGURED'
+            ? NOT_CONFIGURED
+            : genErr.message && /unparseable|JSON/i.test(genErr.message)
+            ? 'The AI returned an unreadable response. Please try again.'
+            : 'Profile generation failed — please try again.';
+        res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
+      } finally {
+        clearInterval(keepAlive);
       }
-      logAIUsage({
-        user_id: req.user.id,
-        department_id: departmentId,
-        feature: 'profile_generation',
-        duration_ms: Date.now() - startedAt,
-        success: true,
-      });
-      const hash = crypto.createHash('sha256').update(context).digest('hex');
-
-      await pool.query(
-        `INSERT INTO attachee_ai_profiles
-           (attachee_id, department_id, strengths, weaknesses, behavioral_patterns,
-            skill_tags, career_paths, summary, details, raw_context_hash)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-         ON CONFLICT (attachee_id) DO UPDATE SET
-           strengths           = EXCLUDED.strengths,
-           weaknesses          = EXCLUDED.weaknesses,
-           behavioral_patterns = EXCLUDED.behavioral_patterns,
-           skill_tags          = EXCLUDED.skill_tags,
-           career_paths        = EXCLUDED.career_paths,
-           summary             = EXCLUDED.summary,
-           details             = EXCLUDED.details,
-           raw_context_hash    = EXCLUDED.raw_context_hash,
-           generated_at        = NOW()`,
-        [
-          attacheeId,
-          departmentId,
-          JSON.stringify(profile.strengths || []),
-          JSON.stringify(profile.weaknesses || []),
-          JSON.stringify(profile.behavioral_patterns || []),
-          profile.skill_tags || [],
-          JSON.stringify(profile.career_paths || []),
-          profile.summary || '',
-          JSON.stringify(profile),
-          hash,
-        ]
-      );
-
-      return res.json({
-        profile: { ...profile, attachee_name: attacheeName, generated_at: new Date() },
-        cached: false,
-      });
+      return res.end();
     } catch (err) {
-      console.error('[AI profile]', err.message);
-      if (err.code === 'AI_NOT_CONFIGURED') return res.status(503).json({ error: NOT_CONFIGURED });
-      return next(err);
-    }
-  }
-);
-
-// POST /api/ai/attachees/:attacheeId/profile/refresh — clear cache.
-router.post(
-  '/attachees/:attacheeId/profile/refresh',
-  verifyToken,
-  requireRole('instructor', 'supervisor'),
-  async (req, res, next) => {
-    try {
-      const attacheeId = parseInt(req.params.attacheeId, 10);
-      if (Number.isNaN(attacheeId)) return res.status(400).json({ error: 'Invalid attachee id' });
-      // Department scope: only clear profiles for attachees in this department.
-      await pool.query(
-        `DELETE FROM attachee_ai_profiles
-          WHERE attachee_id = $1 AND department_id = $2`,
-        [attacheeId, req.user.department_id]
-      );
-      return res.json({ message: 'Cache cleared — fetch the profile again to regenerate.' });
-    } catch (err) {
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ error: 'Profile generation failed — please try again.' })}\n\n`);
+        return res.end();
+      }
       return next(err);
     }
   }

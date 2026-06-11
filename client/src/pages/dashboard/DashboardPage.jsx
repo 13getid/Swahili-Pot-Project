@@ -12,11 +12,16 @@ import {
   Building2,
   UserX,
   GraduationCap,
+  ScrollText,
+  Settings,
 } from 'lucide-react';
 import { getDashboard } from '../../api/dashboard';
 import { getAdminStats } from '../../api/admin';
 import { useAuth } from '../../context/AuthContext';
 import AttacheeDashboard from '../attachee/AttacheeDashboard';
+import ActivityFeed from '../../components/dashboard/ActivityFeed';
+import AnnouncementsPreview from '../../components/dashboard/AnnouncementsPreview';
+import SupervisorAssistant from '../../components/ai/SupervisorAssistant';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Spinner from '../../components/ui/Spinner';
@@ -94,7 +99,42 @@ function AdminDashboard() {
           <ShieldCheck size={16} /> Manage Users
         </Link>
       </Card>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <QuickLink
+          to="/departments"
+          icon={Building2}
+          title="Departments"
+          description="Create and configure departments."
+        />
+        <QuickLink
+          to="/audit"
+          icon={ScrollText}
+          title="Audit Log"
+          description="Review every administrative action."
+        />
+        <QuickLink
+          to="/platform-settings"
+          icon={Settings}
+          title="Platform Settings"
+          description="Maintenance mode and system limits."
+        />
+      </div>
     </div>
+  );
+}
+
+function QuickLink({ to, icon: Icon, title, description }) {
+  return (
+    <Link to={to}>
+      <Card className="h-full p-5 transition-colors hover:bg-hover">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accentSoft">
+          <Icon size={18} className="text-brand-600" />
+        </div>
+        <h3 className="mt-3 font-display text-base font-semibold text-ink">{title}</h3>
+        <p className="mt-1 text-sm text-subtle">{description}</p>
+      </Card>
+    </Link>
   );
 }
 
@@ -168,46 +208,60 @@ function StaffDashboard({ user }) {
         )}
       </div>
 
-      <Card className="p-5">
-        <h3 className="font-display text-base font-semibold text-ink">
-          {data.role === 'instructor' ? 'Your Recent Submissions' : 'Submissions Pending Review'}
-        </h3>
+      <div className={user.role === 'supervisor' ? 'grid grid-cols-1 gap-6 lg:grid-cols-5' : 'space-y-6'}>
+        <div className={user.role === 'supervisor' ? 'space-y-6 lg:col-span-3' : 'space-y-6'}>
+          <AnnouncementsPreview />
 
-        {recent.length === 0 ? (
-          <div className="mt-4">
-            <EmptyState
-              icon={Inbox}
-              title="Nothing here yet"
-              description={
-                data.role === 'instructor'
-                  ? 'Submissions you file will appear here.'
-                  : 'New submissions awaiting review will appear here.'
-              }
-            />
+          <Card className="p-5">
+            <h3 className="font-display text-base font-semibold text-ink">
+              {data.role === 'instructor' ? 'Your Recent Submissions' : 'Submissions Pending Review'}
+            </h3>
+
+            {recent.length === 0 ? (
+              <div className="mt-4">
+                <EmptyState
+                  icon={Inbox}
+                  title="Nothing here yet"
+                  description={
+                    data.role === 'instructor'
+                      ? 'Submissions you file will appear here.'
+                      : 'New submissions awaiting review will appear here.'
+                  }
+                />
+              </div>
+            ) : (
+              <ul className="mt-4 divide-y divide-line">
+                {recent.map((item) => (
+                  <li key={item.id}>
+                    <Link
+                      to="/submissions"
+                      className="flex items-center justify-between gap-3 py-3 hover:opacity-80"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-ink">{item.title}</p>
+                        <p className="text-xs text-subtle">
+                          {item.form_type}
+                          {item.instructor_name ? ` · ${item.instructor_name}` : ''} ·{' '}
+                          <Clock size={11} className="mb-0.5 inline" /> {formatEAT(item.submitted_at)}
+                        </p>
+                      </div>
+                      <Badge status={item.status} />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
+
+        {user.role === 'supervisor' && (
+          <div className="lg:col-span-2">
+            <ActivityFeed />
           </div>
-        ) : (
-          <ul className="mt-4 divide-y divide-line">
-            {recent.map((item) => (
-              <li key={item.id}>
-                <Link
-                  to="/submissions"
-                  className="flex items-center justify-between gap-3 py-3 hover:opacity-80"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-ink">{item.title}</p>
-                    <p className="text-xs text-subtle">
-                      {item.form_type}
-                      {item.instructor_name ? ` · ${item.instructor_name}` : ''} ·{' '}
-                      <Clock size={11} className="mb-0.5 inline" /> {formatEAT(item.submitted_at)}
-                    </p>
-                  </div>
-                  <Badge status={item.status} />
-                </Link>
-              </li>
-            ))}
-          </ul>
         )}
-      </Card>
+      </div>
+
+      {user.role === 'supervisor' && <SupervisorAssistant />}
     </div>
   );
 }

@@ -69,7 +69,7 @@ export default function AttacheeDashboard() {
   if (loading) return <Spinner />;
   if (!data) return null;
 
-  const { stats, today, recentTasks } = data;
+  const { stats, today, recentTasks, attachment } = data;
   const checkedIn = today && !today.check_out;
   const checkedOut = today && today.check_out;
 
@@ -77,8 +77,39 @@ export default function AttacheeDashboard() {
     <div className="space-y-6">
       <div>
         <h2 className="font-display text-2xl font-bold text-ink">Welcome, {user.name}</h2>
-        <p className="mt-1 text-sm text-subtle">{user.department_name} Department · Attachee</p>
+        <p className="mt-1 text-sm text-subtle">
+          {user.department_name} Department · Attachee
+          {attachment?.course_of_study ? ` · ${attachment.course_of_study}` : ''}
+          {attachment?.university_name ? ` · ${attachment.university_name}` : ''}
+        </p>
       </div>
+
+      {/* Attachment progress */}
+      {attachment?.progress_percent != null && (
+        <Card className="p-5">
+          <div className="flex items-center justify-between">
+            <h3 className="font-display text-base font-semibold text-ink">Attachment Progress</h3>
+            <span
+              className={`text-sm font-semibold ${
+                attachment.days_remaining > 30
+                  ? 'text-[#16a34a]'
+                  : attachment.days_remaining >= 10
+                  ? 'text-[#d97706]'
+                  : 'text-[#dc2626]'
+              }`}
+            >
+              {attachment.days_remaining} days remaining
+            </span>
+          </div>
+          <p className="mt-1 text-sm text-subtle">
+            {attachment.days_elapsed} of {attachment.total_days} days completed
+            {attachment.attachment_end_date ? ` · ends ${formatDateEAT(attachment.attachment_end_date)}` : ''}
+          </p>
+          <div className="mt-3 h-2.5 rounded-full bg-hover overflow-hidden">
+            <div className="h-full rounded-full bg-brand-600" style={{ width: `${attachment.progress_percent}%` }} />
+          </div>
+        </Card>
+      )}
 
       {/* Check-in widget */}
       <Card className="p-5">

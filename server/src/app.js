@@ -18,8 +18,19 @@ const notificationRoutes = require('./routes/notifications');
 const adminRoutes = require('./routes/admin');
 const taskRoutes = require('./routes/tasks');
 const attacheeRoutes = require('./routes/attachee');
+const attacheesRoutes = require('./routes/attachees');
 const inquiryRoutes = require('./routes/inquiries');
 const siteRoutes = require('./routes/site');
+const chatRoutes = require('./routes/chat');
+const announcementRoutes = require('./routes/announcements');
+const sessionLogRoutes = require('./routes/sessionLogs');
+const activityRoutes = require('./routes/activity');
+const performanceRoutes = require('./routes/performance');
+const certificateRoutes = require('./routes/certificates');
+const programRoutes = require('./routes/programs');
+const aiRoutes = require('./routes/ai');
+
+const maintenanceGuard = require('./middleware/maintenance');
 
 const app = express();
 
@@ -38,6 +49,9 @@ app.use(cookieParser());
 // Health check
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
+// Platform maintenance mode — blocks non-admin API traffic when enabled.
+app.use(maintenanceGuard);
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/departments', departmentRoutes);
@@ -52,8 +66,17 @@ app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/tasks', taskRoutes);
 app.use('/api/attachee', attacheeRoutes);
+app.use('/api/attachees', attacheesRoutes);
 app.use('/api/inquiries', inquiryRoutes);
 app.use('/api/site', siteRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/announcements', announcementRoutes);
+app.use('/api/session-logs', sessionLogRoutes);
+app.use('/api/activity', activityRoutes);
+app.use('/api/performance', performanceRoutes);
+app.use('/api/certificates', certificateRoutes);
+app.use('/api/programs', programRoutes);
+app.use('/api/ai', aiRoutes);
 
 // 404 fallback for unknown API routes
 app.use('/api', (req, res) => {

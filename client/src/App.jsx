@@ -19,12 +19,27 @@ import DowntimePage from './pages/downtime/DowntimePage';
 import InstructorsPage from './pages/users/InstructorsPage';
 import UsersPage from './pages/admin/UsersPage';
 import SiteContentPage from './pages/admin/SiteContentPage';
+import DepartmentsPage from './pages/admin/DepartmentsPage';
+import AuditLogPage from './pages/admin/AuditLogPage';
+import PlatformSettingsPage from './pages/admin/PlatformSettingsPage';
+import MaintenancePage from './pages/MaintenancePage';
 import ProfilePage from './pages/account/ProfilePage';
 import SettingsPage from './pages/account/SettingsPage';
 import TasksPage from './pages/tasks/TasksPage';
 import InquiriesPage from './pages/inquiries/InquiriesPage';
 import RemindersPage from './pages/attachee/RemindersPage';
 import AttacheesPage from './pages/attachees/AttacheesPage';
+import AttacheeDetailPage from './pages/attachees/AttacheeDetailPage';
+import SupervisorAttendancePage from './pages/attendance/SupervisorAttendancePage';
+import AnnouncementsPage from './pages/announcements/AnnouncementsPage';
+import SessionLogsPage from './pages/sessionLogs/SessionLogsPage';
+import PerformancePage from './pages/performance/PerformancePage';
+import CertificatesPage from './pages/certificates/CertificatesPage';
+import ProgramsPage from './pages/programs/ProgramsPage';
+import AttacheeProfilePage from './pages/AttacheeProfilePage';
+import AIReportsPage from './pages/AIReportsPage';
+import AssistantPage from './pages/ai/AssistantPage';
+import AIUsagePage from './pages/admin/AIUsagePage';
 import TermsPage from './pages/legal/TermsPage';
 import PrivacyPage from './pages/legal/PrivacyPage';
 
@@ -41,6 +56,7 @@ export default function App() {
       {/* Legal (public) */}
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/maintenance" element={<MaintenancePage />} />
       {/* Common aliases → canonical paths */}
       <Route path="/terms-of-service" element={<Navigate to="/terms" replace />} />
       <Route path="/privacy-policy" element={<Navigate to="/privacy" replace />} />
@@ -54,6 +70,78 @@ export default function App() {
         }
       >
         <Route path="/dashboard" element={<DashboardPage />} />
+
+        {/* Announcements — all authenticated roles */}
+        <Route path="/announcements" element={<AnnouncementsPage />} />
+
+        {/* Supervisor department-wide attendance overview */}
+        <Route
+          path="/dept-attendance"
+          element={
+            <RoleRoute roles={['supervisor']}>
+              <SupervisorAttendancePage />
+            </RoleRoute>
+          }
+        />
+
+        <Route
+          path="/session-logs"
+          element={
+            <RoleRoute roles={['instructor', 'supervisor']}>
+              <SessionLogsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/performance"
+          element={
+            <RoleRoute roles={['supervisor']}>
+              <PerformancePage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/certificates"
+          element={
+            <RoleRoute roles={['supervisor', 'admin']}>
+              <CertificatesPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/programs"
+          element={
+            <RoleRoute roles={['supervisor', 'instructor']}>
+              <ProgramsPage />
+            </RoleRoute>
+          }
+        />
+
+        {/* AI Attachee Intelligence Layer */}
+        <Route
+          path="/ai/attachees/:attacheeId/profile"
+          element={
+            <RoleRoute roles={['instructor', 'supervisor']}>
+              <AttacheeProfilePage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/ai/reports/new"
+          element={
+            <RoleRoute roles={['supervisor']}>
+              <AIReportsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/ai/assistant"
+          element={
+            <RoleRoute roles={['supervisor']}>
+              <AssistantPage />
+            </RoleRoute>
+          }
+        />
 
         <Route
           path="/trainees"
@@ -123,6 +211,14 @@ export default function App() {
             </RoleRoute>
           }
         />
+        <Route
+          path="/attachees/:id"
+          element={
+            <RoleRoute roles={['instructor', 'supervisor']}>
+              <AttacheeDetailPage />
+            </RoleRoute>
+          }
+        />
 
         <Route path="/downtime" element={<DowntimePage />} />
 
@@ -149,6 +245,38 @@ export default function App() {
           element={
             <RoleRoute roles={['admin']}>
               <SiteContentPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/departments"
+          element={
+            <RoleRoute roles={['admin']}>
+              <DepartmentsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/audit"
+          element={
+            <RoleRoute roles={['admin']}>
+              <AuditLogPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/platform-settings"
+          element={
+            <RoleRoute roles={['admin']}>
+              <PlatformSettingsPage />
+            </RoleRoute>
+          }
+        />
+        <Route
+          path="/admin/ai-usage"
+          element={
+            <RoleRoute roles={['admin']}>
+              <AIUsagePage />
             </RoleRoute>
           }
         />
